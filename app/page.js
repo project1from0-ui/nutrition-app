@@ -181,15 +181,10 @@ const normalizeShop = (s) => (s || '')
 async function fetchMenuData() {
   try {
     const res = await fetch('/api/menus', { cache: 'no-store' });
-    if (!res.ok) {
-      console.error('APIレスポンスエラー:', res.status);
-      return [];
-    }
+    if (!res.ok) return [];
     const data = await res.json();
-    if (!Array.isArray(data) || data.length === 0) return [];
-    return data;
-  } catch (e) {
-    console.error('データ取得に失敗:', e);
+    return Array.isArray(data) ? data : [];
+  } catch {
     return [];
   }
 }
