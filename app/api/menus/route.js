@@ -6,7 +6,6 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET() {
-  // Vercel環境変数を確実に読み取り
   const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
   const SHEET_ID = process.env.SPREADSHEET_ID;
   const RANGE = process.env.SHEETS_RANGE || 'A2:G2168';
@@ -15,31 +14,24 @@ export async function GET() {
     hasKey: !!API_KEY,
     hasSheet: !!SHEET_ID,
     range: RANGE,
-    keyLength: API_KEY ? API_KEY.length : 0,
-    sheetId: SHEET_ID
   });
 
-  // 環境変数の存在確認（falsy値チェック）
-  if (!API_KEY || !SHEET_ID || API_KEY === '' || SHEET_ID === '') {
-    console.error('[ENV ERROR] Missing required environment variables');
+  if (!API_KEY || !SHEET_ID) {
     return NextResponse.json({ error: 'Missing env' }, { status: 500 });
   }
 
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(RANGE)}?key=${API_KEY}`;
 
   try {
-    console.log('[API CALL] Fetching from Google Sheets API');
     const res = await fetch(url, { cache: 'no-store' });
-    
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      console.error('[SHEETS ERROR]', res.status, text);
+      console.error('Sheets error', res.status, text);
       return NextResponse.json({ error: 'Sheets error', status: res.status }, { status: 500 });
     }
 
     const data = await res.json();
     const values = Array.isArray(data.values) ? data.values : [];
-    console.log('[DATA RECEIVED]', { rowCount: values.length });
 
     const excludeKeywords = [
       '調味料','ドリンク','飲み物','ソース','タレ','飲料','ジュース','コーヒー','お茶','水',
@@ -66,10 +58,9 @@ export async function GET() {
         Number.isFinite(m.carbs)
       );
 
-    console.log('[SUCCESS] Returning', { processedRows: rows.length });
     return NextResponse.json(rows, { status: 200 });
   } catch (e) {
-    console.error('[FETCH FAILED]', e);
+    console.error('Fetch failed', e);
     return NextResponse.json({ error: 'Fetch failed' }, { status: 500 });
   }
 }
