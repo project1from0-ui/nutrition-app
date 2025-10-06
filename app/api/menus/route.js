@@ -8,7 +8,7 @@ export const revalidate = 0;
 export async function GET() {
   const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
   const SHEET_ID = process.env.SPREADSHEET_ID;
-  const RANGE = process.env.SHEETS_RANGE || 'A2:G2168';
+  const RANGE = process.env.SHEETS_RANGE || 'A2:G';
 
   console.log('[ENV CHECK]', {
     hasKey: !!API_KEY,
