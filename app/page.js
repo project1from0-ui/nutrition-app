@@ -419,7 +419,7 @@ export default function Page() {
   if (!isClient) return null;
 
   return (
-    <div style={styles.container}>
+    <div className="container" style={styles.container}>
       {/* ログイン */}
       {currentSection === 'login' && (
         <div style={styles.card}>
@@ -625,7 +625,7 @@ export default function Page() {
             const availableSet = new Set(scoredMenus.map(m => m.letterGrade));
             const availableGrades = gradeOrder.filter(g => availableSet.has(g));
             return (
-              <div style={{ display:'flex', gap:8, justifyContent:'center', marginBottom:16, flexWrap:'wrap' }}>
+          <div className="filter-row" style={{ display:'flex', gap:8, justifyContent:'center', marginBottom:16, flexWrap:'wrap' }}>
                 {['ALL', ...availableGrades].map(g => (
                   <button key={g} onClick={()=>setGradeFilter(g)} style={styles.pill(gradeFilter===g)}>{g}</button>
                 ))}
@@ -659,7 +659,7 @@ export default function Page() {
             </div>
           )}
 
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          <div className="menu-list" style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {(gradeFilter==='ALL' ? scoredMenus : scoredMenus.filter(m => m.letterGrade===gradeFilter)).map((m, i) => (
               <button key={`${m.menu}-${i}`} onClick={()=>handleMenuClick(m)}
                 style={{
