@@ -1,4 +1,6 @@
-'use client';
+"use client";
+import { getProfile } from "../lib/profile.js";
+import { getIdealRanges as getIdealRangesGoal } from "../lib/scoring.js";
 import { useState, useEffect } from 'react';
 
 /* =========================
@@ -165,7 +167,7 @@ const getGradeColor = (letter) => {
   switch (letter) {
     case 'S': return '#d4af37'; // gold
     case 'A': return '#22c55e'; // green
-    case 'B': return '#eab308'; // yellow
+    case 'B': return '#fde047'; // light yellow
     case 'C': return '#f97316'; // orange
     default:  return '#ef4444'; // red
   }
@@ -212,7 +214,7 @@ function Gauge({ letter, size=200 }) {
         strokeDasharray={cir} strokeDashoffset={cir*(1-ratio)}
         transform={`rotate(-90 ${size/2} ${size/2})`}
       />
-      <text x="50%" y="50%" dominantBaseline="middle" textAnchor="middle" fontSize="64" fontWeight="700" fill="#111827">
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="128" fontWeight="700" fill={color} dy="-5">
         {letter}
       </text>
     </svg>
@@ -300,7 +302,7 @@ export default function Page() {
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'shop-select'|'results'|'menu-detail'
+  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'goal-select'|'shop-select'|'results'|'menu-detail'
   const [isClient, setIsClient] = useState(false);
 
   // データ
@@ -309,11 +311,20 @@ export default function Page() {
   const [selectedShop, setSelectedShop] = useState('');
   const [selectedMenu, setSelectedMenu] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [currentGoal, setCurrentGoal] = useState('stay');
 
   // フィルタ
   const [gradeFilter, setGradeFilter] = useState('ALL'); // 'ALL'|'S'|'A'|'B'|'C'|'D'
 
   useEffect(() => { setIsClient(true); }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = JSON.parse(localStorage.getItem('nutrition_profile') || '{}');
+      const g = (saved.goal || 'stay');
+      setCurrentGoal(g);
+    } catch {}
+  }, []);
   useEffect(() => {
     if (!isClient) return;
     fetchMenuData().then(data => {
@@ -333,28 +344,20 @@ export default function Page() {
   };
 
   const handleSearch = () => {
-    if (!birthYear || !birthMonth || !birthDay || !gender || !height || !weight || !goal) {
+    if (!birthYear || !birthMonth || !birthDay || !gender || !height || !weight) {
       alert('すべての項目を入力してください。');
       return;
     }
-    const profile = {
-      birthYear,
-      birthMonth,
-      birthDay,
-      gender,
-      height: parseFloat(height),
-      weight: parseFloat(weight),
-      goal
-    };
-    setUserProfile(profile);
+    // プロフィール入力の次は目的選択へ
     setShowProfileForm(false);
-    setCurrentSection('shop-select');
+    setCurrentSection('goal-select');
   };
 
   const handleBack = () => {
     if (currentSection === 'terms') setCurrentSection('login');
     else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('terms'); }
-    else if (currentSection === 'shop-select') { setShowProfileForm(true); setCurrentSection('profile'); }
+    else if (currentSection === 'shop-select') { setCurrentSection('goal-select'); }
+    else if (currentSection === 'goal-select') { setShowProfileForm(true); setCurrentSection('profile'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
     else if (currentSection === 'menu-detail') { setCurrentSection('results'); setSelectedMenu(null); }
   };
@@ -363,7 +366,7 @@ export default function Page() {
 
   /* ============ 判定・整形（核心） ============ */
   const buildResults = (list, profile) => {
-    const isBulk = profile.goal === 'bulk';
+    const isBulk = (profile.goal === 'bulk') || (currentGoal === 'bulk');
     const R = isBulk ? RANGES_BULK : RANGES_DIET;
     const CENTER = isBulk ? BULK_CENTER : DIET_CENTER;
     const enriched = list.map(m => ({
@@ -415,6 +418,26 @@ export default function Page() {
     },
     aiEvalLabel: { position: 'absolute', top: 12, left: 12, fontSize: 14, fontWeight: 700, color: '#111827' }
   };
+  // 共通：戻るボタン（白丸・固定左上）
+  styles.backButton = {
+    position: 'fixed',
+    top: 12,
+    left: 16, // 少し右へ
+    width: 40,
+    height: 40,
+    borderRadius: '9999px', // 完全な円
+    background: '#ffffff',
+    border: 'none',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+    color: '#111',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    lineHeight: '40px',
+    fontSize: 20,
+    cursor: 'pointer',
+    zIndex: 1000
+  };
 
   if (!isClient) return null;
 
@@ -429,10 +452,52 @@ export default function Page() {
         </div>
       )}
 
+      {/* 目的選択 */}
+      {currentSection === 'goal-select' && (
+        <div style={styles.card}>
+          <h1 style={styles.title}>食事の目的</h1>
+          <p style={{ textAlign:'center', color:'#666', marginBottom:20 }}>この目的は一覧の並びや判定に使われます</p>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, maxWidth:480, margin:'0 auto 16px' }}>
+            <button type="button" onClick={()=>setGoal('diet')}
+              style={{ padding:20, border: goal==='diet'?'2px solid #22c55e':'2px solid #e0e0e0', borderRadius:12,
+                       background: goal==='diet'?'#f0fdf4':'white', color: goal==='diet'?'#166534':'#666', fontWeight: 700 }}>
+              <div style={{ fontSize:24, marginBottom:8 }}>🥗</div>
+              ダイエット
+            </button>
+            <button type="button" onClick={()=>setGoal('bulk')}
+              style={{ padding:20, border: goal==='bulk'?'2px solid #f97316':'2px solid #e0e0e0', borderRadius:12,
+                       background: goal==='bulk'?'#fff7ed':'white', color: goal==='bulk'?'#9a3412':'#666', fontWeight: 700 }}>
+              <div style={{ fontSize:24, marginBottom:8 }}>💪</div>
+              バルクアップ
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              if (!goal) { alert('目的を選択してください'); return; }
+              // プロフィールを確定し、次のステップへ
+              const profile = {
+                birthYear,
+                birthMonth,
+                birthDay,
+                gender,
+                height: parseFloat(height),
+                weight: parseFloat(weight),
+                goal
+              };
+              setUserProfile(profile);
+              setCurrentSection('shop-select');
+            }}
+            style={{ ...styles.button, maxWidth: 360 }}
+            disabled={!goal}
+          >
+            店舗を選ぶ
+          </button>
+        </div>
+      )}
+
       {/* 規約 */}
       {currentSection === 'terms' && (
         <div style={styles.card}>
-          <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
           <h1 style={styles.title}>利用規約への同意</h1>
           <div style={{ background:'#f5f5f5', padding:20, borderRadius:10, marginBottom:20, maxHeight:200, overflowY:'auto' }}>
             <p style={{ lineHeight:1.6, color:'#666' }}>
@@ -453,13 +518,12 @@ export default function Page() {
       {/* プロフィール */}
       {currentSection === 'profile' && showProfileForm && (
         <div style={styles.card}>
-          <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
           <h1 style={styles.title}>プロフィール設定</h1>
 
           {/* 生年月日 */}
           <div style={{ marginBottom:20 }}>
             <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>生年月日 <span style={{ color:'red' }}>*</span></label>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr', gap:10 }}>
               <select value={birthYear} onChange={e=>setBirthYear(e.target.value)} style={styles.input}>
                 <option value="">年を選択</option>
                 {Array.from({length: 80}, (_, i) => 2024 - i).map(y => <option key={y} value={y}>{y}年</option>)}
@@ -478,8 +542,8 @@ export default function Page() {
           {/* 性別 */}
           <div style={{ marginBottom:20 }}>
             <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>性別 <span style={{ color:'red' }}>*</span></label>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:10 }}>
-              {['male','female','other'].map(g => (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:10 }}>
+              {['male','female'].map(g => (
                 <button key={g} type="button" onClick={()=>setGender(g)}
                   style={{
                     padding:12, border: gender===g ? '2px solid #667eea':'2px solid #e0e0e0',
@@ -487,7 +551,7 @@ export default function Page() {
                     color: gender===g ? '#667eea':'#666', fontWeight: gender===g ? 'bold':'normal', cursor:'pointer'
                   }}
                 >
-                  {g==='male'?'男性':g==='female'?'女性':'その他'}
+                  {g==='male'?'男性':'女性'}
                 </button>
               ))}
             </div>
@@ -511,31 +575,16 @@ export default function Page() {
             </select>
           </div>
 
-          {/* 目的 */}
-          <div style={{ marginBottom:30 }}>
-            <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>食事の目的 <span style={{ color:'red' }}>*</span></label>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:10 }}>
-              <button type="button" onClick={()=>setGoal('diet')}
-                style={{ padding:20, border: goal==='diet'?'2px solid #22c55e':'2px solid #e0e0e0', borderRadius:8,
-                         background: goal==='diet'?'#f0fdf4':'white', color: goal==='diet'?'#22c55e':'#666', fontWeight: goal==='diet'?'bold':'normal' }}>
-                <div style={{ fontSize:24, marginBottom:8 }}>🥗</div>ダイエット
-              </button>
-              <button type="button" onClick={()=>setGoal('bulk')}
-                style={{ padding:20, border: goal==='bulk'?'2px solid #f97316':'2px solid #e0e0e0', borderRadius:8,
-                         background: goal==='bulk'?'#fff7ed':'white', color: goal==='bulk'?'#f97316':'#666', fontWeight: goal==='bulk'?'bold':'normal' }}>
-                <div style={{ fontSize:24, marginBottom:8 }}>💪</div>バルクアップ
-              </button>
-            </div>
-          </div>
+          {/* 目的は別ステップへ移動 */}
 
           <button onClick={handleSearch}
             style={{ ...styles.button,
-              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||!goal) ? 0.5 : 1,
-              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||!goal) ? 'not-allowed' : 'pointer'
+              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight) ? 0.5 : 1,
+              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight) ? 'not-allowed' : 'pointer'
             }}
-            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||!goal}
+            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight}
           >
-            検索を開始
+            決定
           </button>
         </div>
       )}
@@ -543,44 +592,10 @@ export default function Page() {
       {/* 店舗選択 */}
       {currentSection === 'shop-select' && (
         <div style={styles.card}>
-          <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
-          <h1 style={styles.title}>🏪 店舗を選択</h1>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
+          <h1 style={styles.title}>大手チェーンから選択</h1>
           <p style={{ textAlign:'center', color:'#666', marginBottom:30 }}>栄養情報を見たい店舗を選んでください</p>
           <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:10, maxWidth:400, margin:'0 auto' }}>
-            {/* ▼ 追加：全店舗比較カード（小さめ） */}
-            <button
-              onClick={() => {
-                setSelectedShop('__ALL__');
-                const results = buildResults(menuData, userProfile);
-                setScoredMenus(results);
-                setGradeFilter('ALL');
-                setCurrentSection('results');
-              }}
-              style={{
-                padding: '12px',
-                background: 'white',
-                border: '2px dashed #c7d2fe',
-                borderRadius: '10px',
-                fontSize: '13px',
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                color: '#4338ca',
-                display: 'block',
-                maxWidth: '400px',
-                margin: '0 auto 8px',
-                opacity: 0.95
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#667eea';
-                e.currentTarget.style.background = '#f5f7ff';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = '#c7d2fe';
-                e.currentTarget.style.background = 'white';
-              }}
-            >
-              🔍 全店舗比較（ランキング）
-            </button>
             {restaurantList.map((shop) => (
               <button key={shop}
                 onClick={() => {
@@ -608,14 +623,14 @@ export default function Page() {
       {/* 結果表示 */}
       {currentSection === 'results' && (
         <div style={styles.card}>
-          <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
           <h1 style={styles.title}>
             🏆 {
               selectedShop
                 ? (selectedShop === '__ALL__'
-                    ? '全店舗のおすすめメニュー'
-                    : `${selectedShop}のおすすめメニュー`)
-                : 'おすすめメニュー'
+                    ? '全店舗Tier'
+                    : `${selectedShop} Tier`)
+                : 'Tier'
             }
           </h1>
 
@@ -665,31 +680,26 @@ export default function Page() {
                 className="menu-card"
                 style={{
                   background:'white', border:'1px solid #e5e7eb', borderRadius:12, padding:16, textAlign:'left',
-                  cursor:'pointer', display:'flex', alignItems:'center', gap:16, boxShadow:'0 2px 8px rgba(0,0,0,0.04)'
+                  cursor:'pointer', display:'flex', alignItems:'center', gap:16, boxShadow:'0 2px 8px rgba(0,0,0,0.04)', position:'relative'
                 }}
                 onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; }}
                 onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.04)'; }}
               >
-                <div className="rank-badge" style={{ width:32, height:32, background:'linear-gradient(135deg, #667eea, #764ba2)', borderRadius:'50%', color:'#fff', display:'grid', placeItems:'center', fontWeight:700 }}>{i+1}</div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', marginBottom:4 }}>{m.menu}</div>
-                  <div className="shop" style={{ fontSize:14, color:'#666', marginBottom:6 }}>{m.shop} - {m.category}</div>
-                </div>
-                {(() => {
-                  const activeRanges = getActiveRangesForJudge(userProfile?.goal, gradeFilter);
-                  const kcalPass = isMetricPass(m.calories, activeRanges, 'calories');
-                  const pPass    = isMetricPass(m.protein,  activeRanges, 'protein');
-                  const fPass    = isMetricPass(m.fat,      activeRanges, 'fat');
-                  const cPass    = isMetricPass(m.carbs,    activeRanges, 'carbs');
-                  return (
-                    <div className="stats" style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      <Stat labelJa="エネルギー" unit="kcal" val={m.calories} pass={kcalPass}/>
-                      <Stat labelJa="たんぱく質" unit="g"    val={m.protein}  pass={pPass}/>
-                      <Stat labelJa="脂質"       unit="g"    val={m.fat}      pass={fPass}/>
-                      <Stat labelJa="炭水化物"   unit="g"    val={m.carbs}    pass={cPass}/>
-                    </div>
-                  );
-                })()}
+                <div className="rank-badge" style={{ 
+                  position:'absolute', 
+                  top:8, 
+                  left:8, 
+                  width:24, 
+                  height:24, 
+                  background:'linear-gradient(135deg, #667eea, #764ba2)', 
+                  borderRadius:'50%', 
+                  color:'#fff', 
+                  display:'grid', 
+                  placeItems:'center', 
+                  fontWeight:700, 
+                  fontSize:10
+                }}>{i+1}位</div>
+                <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
                 <div style={{ padding:'6px 12px', background:getGradeColor(m.letterGrade), color:'#fff', borderRadius:8, fontSize:18, fontWeight:900, letterSpacing:0.5, minWidth:42, textAlign:'center' }}>
                   {m.letterGrade}
                 </div>
@@ -702,49 +712,101 @@ export default function Page() {
       {/* 詳細 */}
       {currentSection === 'menu-detail' && selectedMenu && (
         <div className="detail-wrap" style={styles.card}>
-          <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
           <div className="detail-header">
             <h1 style={styles.title}>{selectedMenu.menu}</h1>
             <p style={{ textAlign:'center', color:'#666', marginBottom:30, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
           </div>
 
-          {/* 栄養表示 */}
-          <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
-            <h2 style={{ fontSize:20, fontWeight:'bold', color:'#333', marginBottom:20, textAlign:'center' }}>栄養成分</h2>
-            <div className="chart">
-              {(() => {
-                const activeRangesDetail = getActiveRangesForJudge(userProfile?.goal, gradeFilter);
-                const kcalPassD = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
-                const pPassD    = isMetricPass(selectedMenu.protein,  activeRangesDetail, 'protein');
-                const fPassD    = isMetricPass(selectedMenu.fat,      activeRangesDetail, 'fat');
-                const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
-                const idealRanges = (userProfile?.goal === 'diet') ? RANGES_DIET.S : RANGES_BULK.S;
-                return (
-                  <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                    <Bar name="エネルギー" value={selectedMenu.calories} unit="kcal" denom={1000} pass={kcalPassD}
-                      idealLow={idealRanges.calories[0]} idealHigh={idealRanges.calories[1]} showLegend={true} />
-                    <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
-                      idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
-                    <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
-                      idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
-                    <Bar name="炭水化物" value={selectedMenu.carbs} unit="g" denom={120} pass={cPassD}
-                      idealLow={idealRanges.carbs[0]} idealHigh={idealRanges.carbs[1]} />
-                  </div>
-                );
-              })()}
+          {/* 評価ゲージ */}
+          <div style={{ display:'flex', justifyContent:'center', marginBottom:24, position:'relative' }}>
+            <div style={{ position:'relative' }}>
+              <div style={{ 
+                position:'absolute', 
+                top:-12, 
+                left:-20, 
+                fontSize:16, 
+                fontWeight:'bold', 
+                color:'#333',
+                background:'#fff',
+                padding:'4px 8px',
+                borderRadius:'6px',
+                border:'1px solid #e5e7eb',
+                zIndex:10
+              }}>
+                AI総合評価
+              </div>
+              <div style={{ width:140, height:140 }}>
+                <Gauge letter={selectedMenu.letterGrade}/>
+              </div>
             </div>
           </div>
 
+          {/* 栄養表示 */}
+          <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
+            <h2 style={{ fontSize:20, fontWeight:'bold', color:'#333', marginBottom:20, textAlign:'center' }}>栄養成分</h2>
+            {(() => {
+              const activeRangesDetail = getActiveRangesForJudge((userProfile?.goal || currentGoal), gradeFilter);
+              const kcalPassD = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
+              const pPassD    = isMetricPass(selectedMenu.protein,  activeRangesDetail, 'protein');
+              const fPassD    = isMetricPass(selectedMenu.fat,      activeRangesDetail, 'fat');
+              const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
+              const idealRanges = ((userProfile?.goal || currentGoal) === 'bulk') ? RANGES_BULK.S : RANGES_DIET.S;
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+                  {/* エネルギー */}
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <div style={{ display:'flex', alignItems:'center' }}>
+                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333' }}>エネルギー</span>
+                    </div>
+                    <div className="chart">
+                      <Bar value={selectedMenu.calories} unit="kcal" denom={1000} pass={kcalPassD}
+                        idealLow={idealRanges.calories[0]} idealHigh={idealRanges.calories[1]} showLegend={true} />
+                    </div>
+                  </div>
+
+                  {/* たんぱく質 */}
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <div style={{ display:'flex', alignItems:'center' }}>
+                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>たんぱく質</span>
+                    </div>
+                    <div className="chart">
+                      <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
+                        idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
+                    </div>
+                  </div>
+
+                  {/* 脂質 */}
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <div style={{ display:'flex', alignItems:'center' }}>
+                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>脂質</span>
+                    </div>
+                    <div className="chart">
+                      <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
+                        idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
+                    </div>
+                  </div>
+
+                  {/* 炭水化物 */}
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <div style={{ display:'flex', alignItems:'center' }}>
+                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>炭水化物</span>
+                    </div>
+                    <div className="chart">
+                      <Bar name="炭水化物" value={selectedMenu.carbs} unit="g" denom={120} pass={cPassD}
+                        idealLow={idealRanges.carbs[0]} idealHigh={idealRanges.carbs[1]} />
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
           {/* AI評価 */}
-          <div style={{ ...styles.aiEvalCard }}>
-            <div style={styles.aiEvalLabel}>AI総合評価</div>
-            <div style={{ width:140, height:140, marginLeft:40 }}>
-              <Gauge letter={selectedMenu.letterGrade}/>
-            </div>
-            <div style={{ marginLeft: 24, flex: 1 }}>
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14 }}>
-                {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
-              </div>
+          <div style={{ ...styles.aiEvalCard, marginTop: '16px' }}>
+            <div style={{ ...styles.aiEvalLabel, marginBottom: '20px' }}>AI論評</div>
+            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14, paddingTop: '54px' }}>
+              {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
             </div>
           </div>
         </div>
@@ -781,7 +843,6 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <div style={{ width: 150, fontSize: 16, fontWeight: 'bold', color: '#333' }}>{name}</div>
         <div
           style={{
             flex: 1,
@@ -791,6 +852,7 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
             borderRadius: RADIUS,
             overflow: 'hidden',
             border: '1px solid #e5e7eb',
+            marginLeft: (name === 'たんぱく質' || name === '脂質' || name === '炭水化物') ? '25%' : '10%',
           }}
         >
           {/* 理想レンジの表示は削除 */}

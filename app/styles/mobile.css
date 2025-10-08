@@ -203,14 +203,14 @@
 }
 
 /* ===== Mobile CSS Active Indicator ===== */
-@media (max-width:768px){
+/* @media (max-width:768px){
   html::before{
     content:"MOBILE CSS ACTIVE";
     position:fixed; inset:auto 8px 8px auto; z-index:9999;
     background:#111; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; opacity:.85;
     pointer-events:none;
   }
-}
+} */
 
 /* ===== Strong & Generic Selectors for Real DOM Override ===== */
 @media (max-width:768px){
