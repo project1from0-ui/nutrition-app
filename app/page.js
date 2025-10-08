@@ -204,7 +204,7 @@ function Gauge({ letter, size=200 }) {
   const ratio = ({S:1, A:0.85, B:0.7, C:0.5, D:0.3}[letter]) ?? 0.3;
   const color = getGradeColor(letter);
   return (
-    <svg width="140" height="140" viewBox={`0 0 ${size} ${size}`} style={{ display:'block' }}>
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ display:'block', width:'100%', height:'auto', maxWidth:'140px' }} preserveAspectRatio="xMidYMid meet">
       <circle cx={size/2} cy={size/2} r={r} fill="#ffffff" stroke="#e5e7eb" strokeWidth={strokeWidth}/>
       <circle
         cx={size/2} cy={size/2} r={r}
@@ -662,6 +662,7 @@ export default function Page() {
           <div className="menu-list" style={{ display:'flex', flexDirection:'column', gap:8 }}>
             {(gradeFilter==='ALL' ? scoredMenus : scoredMenus.filter(m => m.letterGrade===gradeFilter)).map((m, i) => (
               <button key={`${m.menu}-${i}`} onClick={()=>handleMenuClick(m)}
+                className="menu-card"
                 style={{
                   background:'white', border:'1px solid #e5e7eb', borderRadius:12, padding:16, textAlign:'left',
                   cursor:'pointer', display:'flex', alignItems:'center', gap:16, boxShadow:'0 2px 8px rgba(0,0,0,0.04)'
@@ -669,10 +670,10 @@ export default function Page() {
                 onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; }}
                 onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.04)'; }}
               >
-                <div style={{ width:32, height:32, background:'linear-gradient(135deg, #667eea, #764ba2)', borderRadius:'50%', color:'#fff', display:'grid', placeItems:'center', fontWeight:700 }}>{i+1}</div>
+                <div className="rank-badge" style={{ width:32, height:32, background:'linear-gradient(135deg, #667eea, #764ba2)', borderRadius:'50%', color:'#fff', display:'grid', placeItems:'center', fontWeight:700 }}>{i+1}</div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:16, fontWeight:'bold', color:'#333', marginBottom:4 }}>{m.menu}</div>
-                  <div style={{ fontSize:14, color:'#666', marginBottom:6 }}>{m.shop} - {m.category}</div>
+                  <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', marginBottom:4 }}>{m.menu}</div>
+                  <div className="shop" style={{ fontSize:14, color:'#666', marginBottom:6 }}>{m.shop} - {m.category}</div>
                 </div>
                 {(() => {
                   const activeRanges = getActiveRangesForJudge(userProfile?.goal, gradeFilter);
@@ -681,7 +682,7 @@ export default function Page() {
                   const fPass    = isMetricPass(m.fat,      activeRanges, 'fat');
                   const cPass    = isMetricPass(m.carbs,    activeRanges, 'carbs');
                   return (
-                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <div className="stats" style={{ display:'flex', gap:8, alignItems:'center' }}>
                       <Stat labelJa="エネルギー" unit="kcal" val={m.calories} pass={kcalPass}/>
                       <Stat labelJa="たんぱく質" unit="g"    val={m.protein}  pass={pPass}/>
                       <Stat labelJa="脂質"       unit="g"    val={m.fat}      pass={fPass}/>
@@ -700,34 +701,38 @@ export default function Page() {
 
       {/* 詳細 */}
       {currentSection === 'menu-detail' && selectedMenu && (
-        <div style={styles.card}>
+        <div className="detail-wrap" style={styles.card}>
           <button onClick={handleBack} style={{position:'absolute',top:20,left:20,background:'none',border:'none',fontSize:24,cursor:'pointer',color:'#667eea'}}>←</button>
-          <h1 style={styles.title}>{selectedMenu.menu}</h1>
-          <p style={{ textAlign:'center', color:'#666', marginBottom:30, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
+          <div className="detail-header">
+            <h1 style={styles.title}>{selectedMenu.menu}</h1>
+            <p style={{ textAlign:'center', color:'#666', marginBottom:30, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
+          </div>
 
           {/* 栄養表示 */}
-          <div style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
+          <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
             <h2 style={{ fontSize:20, fontWeight:'bold', color:'#333', marginBottom:20, textAlign:'center' }}>栄養成分</h2>
-            {(() => {
-              const activeRangesDetail = getActiveRangesForJudge(userProfile?.goal, gradeFilter);
-              const kcalPassD = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
-              const pPassD    = isMetricPass(selectedMenu.protein,  activeRangesDetail, 'protein');
-              const fPassD    = isMetricPass(selectedMenu.fat,      activeRangesDetail, 'fat');
-              const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
-              const idealRanges = (userProfile?.goal === 'diet') ? RANGES_DIET.S : RANGES_BULK.S;
-              return (
-                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                  <Bar name="エネルギー" value={selectedMenu.calories} unit="kcal" denom={1000} pass={kcalPassD}
-                    idealLow={idealRanges.calories[0]} idealHigh={idealRanges.calories[1]} showLegend={true} />
-                  <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
-                    idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
-                  <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
-                    idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
-                  <Bar name="炭水化物" value={selectedMenu.carbs} unit="g" denom={120} pass={cPassD}
-                    idealLow={idealRanges.carbs[0]} idealHigh={idealRanges.carbs[1]} />
-                </div>
-              );
-            })()}
+            <div className="chart">
+              {(() => {
+                const activeRangesDetail = getActiveRangesForJudge(userProfile?.goal, gradeFilter);
+                const kcalPassD = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
+                const pPassD    = isMetricPass(selectedMenu.protein,  activeRangesDetail, 'protein');
+                const fPassD    = isMetricPass(selectedMenu.fat,      activeRangesDetail, 'fat');
+                const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
+                const idealRanges = (userProfile?.goal === 'diet') ? RANGES_DIET.S : RANGES_BULK.S;
+                return (
+                  <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                    <Bar name="エネルギー" value={selectedMenu.calories} unit="kcal" denom={1000} pass={kcalPassD}
+                      idealLow={idealRanges.calories[0]} idealHigh={idealRanges.calories[1]} showLegend={true} />
+                    <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
+                      idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
+                    <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
+                      idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
+                    <Bar name="炭水化物" value={selectedMenu.carbs} unit="g" denom={120} pass={cPassD}
+                      idealLow={idealRanges.carbs[0]} idealHigh={idealRanges.carbs[1]} />
+                  </div>
+                );
+              })()}
+            </div>
           </div>
 
           {/* AI評価 */}
