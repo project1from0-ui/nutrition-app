@@ -202,4 +202,57 @@
   }
 }
 
+/* ===== Mobile CSS Active Indicator ===== */
+@media (max-width:768px){
+  html::before{
+    content:"MOBILE CSS ACTIVE";
+    position:fixed; inset:auto 8px 8px auto; z-index:9999;
+    background:#111; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; opacity:.85;
+    pointer-events:none;
+  }
+}
+
+/* ===== Strong & Generic Selectors for Real DOM Override ===== */
+@media (max-width:768px){
+
+  /* 一覧：1カラム化＆カードの基本スタイル（li/article/…を包括） */
+  main :is(ul,ol){ display:grid !important; gap:12px !important; }
+  main :is(li,article,[class*="card"],[class*="item"]){
+    display:grid !important; gap:12px !important;
+    padding:12px !important; border:1px solid #eee !important; border-radius:12px !important; background:#fff !important;
+    overflow:visible !important;   /* 子のゲージが切れないように */
+  }
+
+  /* 栄養チップ：2×2で折り返し（実クラスに依らず網を広く） */
+  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]){
+    display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)) !important; gap:8px !important;
+  }
+  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) > *{
+    padding:8px 10px !important; border:1px solid #eee !important; border-radius:10px !important; background:#fff !important;
+    overflow:visible !important;  /* 小さな円グラフの欠け防止 */
+  }
+  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) :is(b,.value){ font-weight:700 !important; font-size:clamp(15px,4.2vw,16px) !important; }
+  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) small{ font-size:11px !important; opacity:.75 !important; }
+
+  /* タイトル・サブテキスト（縦長対策） */
+  main :is(h1,.title){ -webkit-line-clamp:2; display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; line-height:1.28 !important; }
+  main :is(.shop,[class*="shop"],[class*="subtitle"]){ font-size:13px !important; opacity:.75 !important; }
+
+  /* 詳細：1カラム化＆栄養行 左右整列 */
+  main :is(.detail-grid,[class*="detail"],[class*="grid"]){ display:grid !important; grid-template-columns:1fr !important; gap:12px !important; }
+  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]){ display:grid !important; grid-template-columns:1fr auto !important; gap:8px !important; align-items:center !important; }
+  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]) :is(.val,[class*="val"]){ text-align:right !important; white-space:nowrap !important; }
+
+  /* グラフ（svg/canvas）を親幅に合わせ、中央寄せ＆サイズ上限 */
+  main :is(.chart,[class*="chart"],[class*="graph"],[class*="donut"],[class*="gauge"]){
+    width:100% !important; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; padding-bottom:4px !important;
+  }
+  main :is(.chart,[class*="chart"],[class*="graph"]) :is(svg,canvas),
+  main svg[viewBox]{ display:block !important; margin:0 auto !important; width:min(100%,320px) !important; height:auto !important; max-height:60vh !important; }
+  main :is(.chart,[class*="chart"],[class*="graph"]) text{ font-size:clamp(11px,3.4vw,13px) !important; }
+
+  /* 背景の縦帯/装飾は非表示（実クラス不明でもカバー） */
+  :is(.bg-vertical,.bg-stripe,.decor-rail,.gradient-rail,.side-rail,.background-rail){ display:none !important; }
+}
+
 
