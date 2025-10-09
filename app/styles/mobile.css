@@ -1,319 +1,205 @@
-:root{
-  --bp-md:768px;
-  --radius:12px;
-  --space-1:6px; --space-2:10px; --space-3:14px; --space-4:18px;
-}
-
-/* ベースのタイポと余白をモバイル寄りに */
-@media (max-width: 768px){
-  h1{ font-size: clamp(20px, 6vw, 24px); margin: 0 0 var(--space-2); }
-  h2{ font-size: clamp(16px, 4.8vw, 20px); margin: 0 0 var(--space-2); }
-  p, li, button, select, label, .text { font-size: clamp(14px, 3.9vw, 16px); }
-  .container{ padding: var(--space-3); }
-  .card, .panel{ border-radius: var(--radius); }
-}
-
-/* 背景の縦帯/飾りをモバイルでは隠す（該当クラスが無ければ後で当てる） */
-@media (max-width: 768px){
-  .bg-stripe, .bg-vertical, .decor-rail{ display: none !important; }
-}
-
-/* フィルタ/タブ周り（横スクロール対応） */
-@media (max-width: 768px){
-  .filter-bar{ position: sticky; top: 0; z-index: 20; background:#fff; padding: var(--space-2); border-bottom:1px solid #eee; }
-  .filter-row{ display:flex; gap:8px; overflow-x:auto; -webkit-overflow-scrolling: touch; padding-bottom:4px; }
-  .filter-row > *{ flex: 0 0 auto; }
-}
-
-/* メニュー一覧カードのレイアウト */
-@media (max-width: 768px){
-  .menu-list{ display:grid; gap: var(--space-2); }
-  .menu-card{
-    display:grid; gap: var(--space-2);
-    grid-template-columns: 1fr; /* 1カラム */
-    padding: var(--space-3); border:1px solid #eee; border-radius: var(--radius); background:#fff;
-  }
-  .menu-card .title{ font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .menu-card .shop{ font-size: 12px; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-  /* 栄養チップの折り返し（2×2に収める） */
-  .stats{ display:grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .stat{ text-align: right; padding:10px; border:1px solid #eee; border-radius: 10px; background:#fff; }
-  .stat small{ display:block; opacity:.7; font-size: 11px; }
-
-  /* ランクバッジのはみ出し防止（右上固定のとき） */
-  .rank-badge{ justify-self: end; align-self: start; }
-}
-
-/* 詳細ページの2カラム→1カラム、グラフは横にはみ出さない */
-@media (max-width: 768px){
-  .detail-wrap{ padding: var(--space-3); }
-  .detail-grid{ display:grid; grid-template-columns: 1fr; gap: var(--space-2); }
-  .detail-header{ display:grid; gap: 6px; }
-  .chart{ width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
-  .chart svg, .chart canvas{ width: 100% !important; height: auto !important; max-width: 100% !important; }
-}
-
-/* タップ領域 */
-@media (max-width: 768px){
-  button, .btn, select{ min-height: 44px; padding: 10px 12px; border-radius: 12px; }
-}
-
-/* 余計な装飾を落とす（任意クラス） */
-@media (max-width: 768px){
-  .hide-on-mobile{ display: none !important; }
-}
-
-/* --- モバイル最終チューニング --- */
-@media (max-width: 768px){
-  /* 一覧カードをさらにコンパクトに */
-  .menu-card{ padding: 12px; }
-  .menu-card .title{ -webkit-line-clamp: 2; line-height: 1.3; }
-  .menu-card .shop{ font-size: 12px; opacity: .7; }
-
-  /* 栄養チップを一回りだけ小さく、数値は太字で読みやすく */
-  .stats{ grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; }
-  .stat{ padding: 8px 10px; }
-  .stat b, .stat .value{ font-weight: 700; font-size: clamp(15px, 4.2vw, 16px); }
-  .stat small{ font-size: 11px; opacity: .75; }
-
-  /* 円/ドーナツ・棒グラフのサイズ上限と中央寄せ */
-  .chart{ width:100%; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
-  .chart svg, .chart canvas{
-    display:block; margin:0 auto;
-    width: min(100%, 340px) !important;
-    height: auto !important;
-    max-height: 60vh;
+/* モバイル対応CSS */
+@media (max-width: 768px) {
+  /* コンテナのパディング調整 */
+  .container {
+    padding: 12px !important;
   }
 
-  /* 栄養成分の行を左右できっちり整列（詳細ページ） */
-  .nutrient-row{ display:grid; grid-template-columns: 1fr auto; gap: 8px; align-items:center; }
-  .nutrient-row .name{ font-weight: 600; }
-  .nutrient-row .val{ text-align:right; }
-
-  /* 余白最適化：セクション間の余白を少し詰める */
-  .section{ margin-block: 12px; }
-}
-
-/* モバイルで背景の装飾は隠す（強制） */
-@media (max-width: 768px){
-  .bg-vertical, .bg-stripe, .decor-rail{ display: none !important; }
-}
-
-/* ===== Auto-generated mobile fix (based on actual DOM) ===== */
-@media (max-width: 768px){
-
-  /* A) カード1カラム化（実クラス: .menu-list > .menu-card） */
-  .menu-list { 
-    display: grid !important; 
-    gap: 12px !important; 
-    grid-template-columns: 1fr !important;
+  /* フィルターバーの調整 */
+  .filter-bar {
+    margin-bottom: 16px !important;
   }
-  .menu-card {
-    border-radius: 12px !important; 
-    padding: 12px !important; 
-    background: #fff !important;
+
+  .filter-row {
+    display: flex !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  /* メニューリストの調整 */
+  .menu-list {
     display: grid !important;
-    grid-template-columns: 1fr !important;
     gap: 12px !important;
   }
 
-  /* B) 栄養チップ群：2×2 + gap（実クラス: .stats） */
-  .stats {
-    display: grid !important;
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
+  /* メニューカードの調整 */
+  .menu-card {
+    padding: 12px !important;
+    border-radius: 12px !important;
   }
 
-  /* C) 栄養チップ内の数値と単位（Statコンポーネント内） */
-  .stats > div {
-    padding: 8px 10px !important; 
-    border: 1px solid #eee !important; 
-    border-radius: 10px !important; 
-    background: #fff !important;
-    text-align: center !important;
-  }
-  .stats b, .stats .value {
-    font-weight: 700 !important; 
-    font-size: clamp(15px, 4.2vw, 16px) !important;
-  }
-  .stats small {
-    font-size: 11px !important; 
-    opacity: .75 !important;
-  }
-
-  /* D) グラフ（実クラス: .chart） */
-  .chart {
-    width: 100% !important; 
-    overflow-x: auto !important; 
-    -webkit-overflow-scrolling: touch !important; 
-    padding-bottom: 4px !important;
-  }
-  .chart svg, .chart canvas {
-    display: block !important; 
-    margin: 0 auto !important;
-    width: min(100%, 320px) !important; 
-    height: auto !important; 
-    max-height: 60vh !important;
-  }
-
-  /* E) 詳細ページの栄養行（実クラス: .nutrient-row） */
-  .nutrient-row {
-    display: grid !important; 
-    grid-template-columns: 1fr auto !important; 
-    gap: 8px !important; 
-    align-items: center !important;
-  }
-  .nutrient-row .val {
-    text-align: right !important; 
-    white-space: nowrap !important;
-  }
-
-  /* F) 背景の縦帯/装飾を隠す */
-  .bg-vertical, .bg-stripe, .decor-rail, .gradient-rail, .side-rail, .background-rail {
-    display: none !important;
-  }
-
-  /* タップ領域と余白の微調整 */
-  button, .btn, select { 
-    min-height: 44px !important; 
-    padding: 10px 12px !important; 
-    border-radius: 12px !important; 
-  }
-
-  /* タイトルとショップ名の最適化 */
-  .title {
-    font-weight: 700 !important;
+  .menu-card .title {
+    font-size: clamp(14px, 4vw, 16px) !important;
     line-height: 1.3 !important;
     -webkit-line-clamp: 2 !important;
     display: -webkit-box !important;
     -webkit-box-orient: vertical !important;
     overflow: hidden !important;
   }
-  .shop {
-    font-size: 12px !important; 
-    opacity: .7 !important;
+
+  .menu-card .shop {
+    font-size: 12px !important;
+    opacity: 0.7 !important;
   }
 
-  /* ランクバッジの位置調整 */
-  .rank-badge {
-    justify-self: end !important; 
-    align-self: start !important;
-  }
-}
-
-/* ===== Mobile CSS Active Indicator ===== */
-/* @media (max-width:768px){
-  html::before{
-    content:"MOBILE CSS ACTIVE";
-    position:fixed; inset:auto 8px 8px auto; z-index:9999;
-    background:#111; color:#fff; font-size:12px; padding:4px 8px; border-radius:6px; opacity:.85;
-    pointer-events:none;
-  }
-} */
-
-/* ===== Strong & Generic Selectors for Real DOM Override ===== */
-@media (max-width:768px){
-
-  /* 一覧：1カラム化＆カードの基本スタイル（li/article/…を包括） */
-  main :is(ul,ol){ display:grid !important; gap:12px !important; }
-  main :is(li,article,[class*="card"],[class*="item"]){
-    display:grid !important; gap:12px !important;
-    padding:12px !important; border:1px solid #eee !important; border-radius:12px !important; background:#fff !important;
-    overflow:visible !important;   /* 子のゲージが切れないように */
+  /* 栄養チップの調整 */
+  .stats {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
   }
 
-  /* 栄養チップ：2×2で折り返し（実クラスに依らず網を広く） */
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]){
-    display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)) !important; gap:8px !important;
+  .stat {
+    padding: 8px 10px !important;
+    border-radius: 10px !important;
+    border: 1px solid #eee !important;
+    background: #fff !important;
   }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) > *{
-    padding:8px 10px !important; border:1px solid #eee !important; border-radius:10px !important; background:#fff !important;
-    overflow:visible !important;  /* 小さな円グラフの欠け防止 */
+
+  .stat b, .stat .value {
+    font-weight: 700 !important;
+    font-size: clamp(15px, 4.2vw, 16px) !important;
   }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) :is(b,.value){ font-weight:700 !important; font-size:clamp(15px,4.2vw,16px) !important; }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) small{ font-size:11px !important; opacity:.75 !important; }
 
-  /* タイトル・サブテキスト（縦長対策） */
-  main :is(h1,.title){ -webkit-line-clamp:2; display:-webkit-box; -webkit-box-orient:vertical; overflow:hidden; line-height:1.28 !important; }
-  main :is(.shop,[class*="shop"],[class*="subtitle"]){ font-size:13px !important; opacity:.75 !important; }
-
-  /* 詳細：1カラム化＆栄養行 左右整列 */
-  main :is(.detail-grid,[class*="detail"],[class*="grid"]){ display:grid !important; grid-template-columns:1fr !important; gap:12px !important; }
-  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]){ display:grid !important; grid-template-columns:1fr auto !important; gap:8px !important; align-items:center !important; }
-  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]) :is(.val,[class*="val"]){ text-align:right !important; white-space:nowrap !important; }
-
-  /* グラフ（svg/canvas）を親幅に合わせ、中央寄せ＆サイズ上限 */
-  main :is(.chart,[class*="chart"],[class*="graph"],[class*="donut"],[class*="gauge"]){
-    width:100% !important; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; padding-bottom:4px !important;
+  .stat small {
+    font-size: 11px !important;
+    opacity: 0.75 !important;
   }
-  main :is(.chart,[class*="chart"],[class*="graph"]) :is(svg,canvas),
-  main svg[viewBox]{ display:block !important; margin:0 auto !important; width:min(100%,320px) !important; height:auto !important; max-height:60vh !important; }
-  main :is(.chart,[class*="chart"],[class*="graph"]) text{ font-size:clamp(11px,3.4vw,13px) !important; }
 
-  /* 背景の縦帯/装飾は非表示（実クラス不明でもカバー） */
-  :is(.bg-vertical,.bg-stripe,.decor-rail,.gradient-rail,.side-rail,.background-rail){ display:none !important; }
-}
+  /* 詳細ページの調整 */
+  .detail-wrap {
+    padding: 16px !important;
+  }
 
-/* ===== iPhone見づらさ対策（最終調整） ===== */
-@media (max-width:768px){
-
-  /* ❶ 見出し縮小＆行間最適化（一覧・詳細の大きすぎるh1対策） */
-  main :is(h1,.page-title){
+  .detail-header h1 {
     font-size: clamp(18px, 5.2vw, 22px) !important;
     line-height: 1.25 !important;
     margin-block: 8px 10px !important;
   }
 
-  /* ❷ カードをさらにコンパクトに（1画面に2〜3枚入る密度） */
-  main :is(li,article,[class*="card"],[class*="item"]){
+  .detail-grid {
+    padding: 16px !important;
+    margin-bottom: 16px !important;
+  }
+
+  /* チャートの調整 */
+  .chart {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 4px !important;
+  }
+
+  .chart svg, .chart canvas {
+    display: block !important;
+    margin: 0 auto !important;
+    width: min(100%, 300px) !important;
+    height: auto !important;
+    max-height: 52vh !important;
+  }
+
+  .chart text {
+    font-size: clamp(11px, 3.4vw, 13px) !important;
+  }
+
+  /* 栄養成分行の調整 */
+  .nutrient-row {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    gap: 8px !important;
+    align-items: center !important;
+  }
+
+  .nutrient-row .val {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+
+  /* 背景装飾の非表示 */
+  .bg-vertical, .bg-stripe, .decor-rail, .gradient-rail, .side-rail, .background-rail {
+    display: none !important;
+  }
+
+  /* タップ領域の調整 */
+  button, .btn, select {
+    min-height: 44px !important;
+    padding: 10px 12px !important;
+    border-radius: 12px !important;
+  }
+
+  /* 見出しの調整 */
+  main :is(h1, .page-title) {
+    font-size: clamp(18px, 5.2vw, 22px) !important;
+    line-height: 1.25 !important;
+    margin-block: 8px 10px !important;
+  }
+
+  /* カードのコンパクト化 */
+  main :is(li, article, [class*="card"], [class*="item"]) {
     padding: 10px 12px !important;
     gap: 10px !important;
   }
 
-  /* ❸ 栄養チップ：2×2固定、数字は太字、小さめ余白 */
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]){
-    display:grid !important; grid-template-columns:repeat(2,minmax(0,1fr)) !important; gap:6px !important;
-  }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) > *{
-    padding: 8px 8px !important; min-width: 0 !important;
-    border: 1px solid #eee !important; border-radius: 10px !important; background:#fff !important;
-  }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) :is(b,.value){
-    font-weight: 700 !important; font-size: clamp(14px, 4vw, 15px) !important;
-  }
-  main :is(.stats,[class*="stat"],[class*="nutri"],[class*="chip"],[class*="metric"]) small{
-    font-size: 10.5px !important; opacity: .75 !important;
+  /* 栄養チップの2x2グリッド */
+  main :is(.stats, [class*="stat"], [class*="nutri"], [class*="chip"], [class*="metric"]) {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
   }
 
-  /* ❹ ゲージ/棒グラフの"欠け"根本対策：親のclip/overflowを解除、サイズ上限 */
-  /* 親の丸角パネルが overflow:hidden だと切れることがあるため全面解除 */
-  main :is(section,div,article,li,[class*="panel"],[class*="section"]){
+  main :is(.stats, [class*="stat"], [class*="nutri"], [class*="chip"], [class*="metric"]) > * {
+    padding: 8px 8px !important;
+    min-width: 0 !important;
+    border: 1px solid #eee !important;
+    border-radius: 10px !important;
+    background: #fff !important;
+  }
+
+  main :is(.stats, [class*="stat"], [class*="nutri"], [class*="chip"], [class*="metric"]) :is(b, .value) {
+    font-weight: 700 !important;
+    font-size: clamp(14px, 4vw, 15px) !important;
+  }
+
+  main :is(.stats, [class*="stat"], [class*="nutri"], [class*="chip"], [class*="metric"]) small {
+    font-size: 10.5px !important;
+    opacity: 0.75 !important;
+  }
+
+  /* グラフの調整 */
+  main :is(section, div, article, li, [class*="panel"], [class*="section"]) {
     overflow: visible !important;
   }
-  /* グラフ要素のサイズ制御＆中央寄せ */
-  main :is(.chart,[class*="chart"],[class*="graph"],[class*="gauge"],[class*="donut"]){
-    width:100% !important; overflow-x:auto !important; -webkit-overflow-scrolling:touch !important; padding-bottom:4px !important;
+
+  main :is(.chart, [class*="chart"], [class*="graph"], [class*="gauge"], [class*="donut"]) {
+    width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 4px !important;
   }
-  main :is(.chart,[class*="chart"],[class*="graph"]) :is(svg,canvas),
-  main svg[viewBox]{
-    display:block !important; margin:0 auto !important;
-    width: min(100%, 300px) !important; height:auto !important; max-height: 52vh !important;
+
+  main :is(.chart, [class*="chart"], [class*="graph"]) :is(svg, canvas), main svg[viewBox] {
+    display: block !important;
+    margin: 0 auto !important;
+    width: min(100%, 300px) !important;
+    height: auto !important;
+    max-height: 52vh !important;
   }
-  main :is(.chart,[class*="chart"],[class*="graph"]) text{
+
+  main :is(.chart, [class*="chart"], [class*="graph"]) text {
     font-size: clamp(11px, 3.4vw, 13px) !important;
   }
 
-  /* ❺ 詳細ページの"栄養成分"行：左右整列＆数値は折返さない */
-  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]){
-    display:grid !important; grid-template-columns: 1fr auto !important; gap:8px !important; align-items:center !important;
-  }
-  main :is(.nutrient-row,[class*="nutrient"],[class*="row-nutri"]) :is(.val,[class*="val"]){
-    text-align:right !important; white-space: nowrap !important;
+  /* 栄養成分行の左右整列 */
+  main :is(.nutrient-row, [class*="nutrient"], [class*="row-nutri"]) {
+    display: grid !important;
+    grid-template-columns: 1fr auto !important;
+    gap: 8px !important;
+    align-items: center !important;
   }
 
-  /* ❻ 背景の縦帯/飾りは強制非表示（視界確保） */
-  :is(.bg-vertical,.bg-stripe,.decor-rail,.gradient-rail,.side-rail,.background-rail){ display:none !important; }
+  main :is(.nutrient-row, [class*="nutrient"], [class*="row-nutri"]) :is(.val, [class*="val"]) {
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
 }
-
-
