@@ -327,9 +327,9 @@ export default function Page() {
   }, []);
   useEffect(() => {
     if (!isClient) return;
-    fetchMenuData().then(data => {
+      fetchMenuData().then(data => {
       console.log('[FETCH OK] rows:', data.length);
-      setMenuData(data);
+          setMenuData(data);
       if (data.length === 0) alert('データの取得に失敗しました。インターネット接続をご確認ください。');
     });
   }, [isClient]);
@@ -497,7 +497,7 @@ export default function Page() {
 
       {/* 規約 */}
       {currentSection === 'terms' && (
-        <div style={styles.card}>
+       <div style={styles.card}>
           <h1 style={styles.title}>利用規約への同意</h1>
           <div style={{ background:'#f5f5f5', padding:20, borderRadius:10, marginBottom:20, maxHeight:200, overflowY:'auto' }}>
             <p style={{ lineHeight:1.6, color:'#666' }}>
@@ -517,9 +517,9 @@ export default function Page() {
 
       {/* プロフィール */}
       {currentSection === 'profile' && showProfileForm && (
-        <div style={styles.card}>
-          <h1 style={styles.title}>プロフィール設定</h1>
-
+       <div style={styles.card}>
+         <h1 style={styles.title}>プロフィール設定</h1>
+          
           {/* 生年月日 */}
           <div style={{ marginBottom:20 }}>
             <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>生年月日 <span style={{ color:'red' }}>*</span></label>
@@ -545,14 +545,14 @@ export default function Page() {
             <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:10 }}>
               {['male','female'].map(g => (
                 <button key={g} type="button" onClick={()=>setGender(g)}
-                  style={{
+                style={{
                     padding:12, border: gender===g ? '2px solid #667eea':'2px solid #e0e0e0',
                     borderRadius:8, background: gender===g ? '#f0f4ff':'white',
                     color: gender===g ? '#667eea':'#666', fontWeight: gender===g ? 'bold':'normal', cursor:'pointer'
                   }}
                 >
                   {g==='male'?'男性':'女性'}
-                </button>
+              </button>
               ))}
             </div>
           </div>
@@ -647,7 +647,7 @@ export default function Page() {
               </div>
             );
           })()}
-
+          
           {/* プロフィール表示 */}
           {userProfile && (
             <div style={{ background:'linear-gradient(to right, #f0f4ff, #f0fdf4)', padding:16, borderRadius:12, marginBottom:24 }}>
@@ -706,9 +706,9 @@ export default function Page() {
               </button>
             ))}
           </div>
-        </div>
-      )}
-
+            </div>
+          )}
+          
       {/* 詳細 */}
       {currentSection === 'menu-detail' && selectedMenu && (
         <div className="detail-wrap" style={styles.card}>
@@ -721,7 +721,7 @@ export default function Page() {
           {/* 評価ゲージ */}
           <div style={{ display:'flex', justifyContent:'center', marginBottom:24, position:'relative' }}>
             <div style={{ position:'relative' }}>
-              <div style={{ 
+              <div style={{
                 position:'absolute', 
                 top:-12, 
                 left:-20, 
@@ -740,8 +740,8 @@ export default function Page() {
                 <Gauge letter={selectedMenu.letterGrade}/>
               </div>
             </div>
-          </div>
-
+              </div>
+              
           {/* 栄養表示 */}
           <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
             <h2 style={{ fontSize:20, fontWeight:'bold', color:'#333', marginBottom:20, textAlign:'center' }}>栄養成分</h2>
@@ -769,12 +769,12 @@ export default function Page() {
                   <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                     <div style={{ display:'flex', alignItems:'center' }}>
                       <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>たんぱく質</span>
-                    </div>
+                </div>
                     <div className="chart">
                       <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
                         idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
-                    </div>
-                  </div>
+                </div>
+                </div>
 
                   {/* 脂質 */}
                   <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
@@ -784,9 +784,9 @@ export default function Page() {
                     <div className="chart">
                       <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
                         idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
-                    </div>
-                  </div>
-
+                </div>
+              </div>
+              
                   {/* 炭水化物 */}
                   <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
                     <div style={{ display:'flex', alignItems:'center' }}>
@@ -803,10 +803,26 @@ export default function Page() {
           </div>
 
           {/* AI評価 */}
-          <div style={{ ...styles.aiEvalCard, marginTop: '16px' }}>
-            <div style={{ ...styles.aiEvalLabel, marginBottom: '20px' }}>AI論評</div>
-            <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14, paddingTop: '54px' }}>
-              {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
+          <div style={{ position:'relative', marginTop: '16px' }}>
+            <div style={{ 
+              position:'absolute', 
+              top:-20, 
+              left:-12, 
+              fontSize:14, 
+              fontWeight:700, 
+              color:'#111827',
+              background:'#fff',
+              padding:'4px 8px',
+              borderRadius:'4px',
+              border:'1px solid #e5e7eb',
+              zIndex:10
+            }}>
+              AI論評
+                  </div>
+            <div style={{ ...styles.aiEvalCard }}>
+              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14, paddingTop: '40px' }}>
+                {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
+              </div>
             </div>
           </div>
         </div>
@@ -861,7 +877,7 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
           <div
             style={{
               width: `${pct}%`,
-              height: '100%',
+                    height: '100%',
               background: barFill,
               boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.35)',
             }}
@@ -872,8 +888,8 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
             style={{
               position: 'absolute',
               inset: 0,
-              display: 'flex',
-              alignItems: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
               justifyContent: 'flex-start',
               paddingLeft: 12,
             }}
@@ -891,7 +907,7 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
             >
               {Number.isFinite(value) ? `${value}${unit ? ` ${unit}` : ''}` : '-'}
             </span>
-          </div>
+                  </div>
 
           {/* ▼ 右端ギャップ表示（赤＆未クリアのときのみ） */}
           {gapText && (
@@ -912,12 +928,12 @@ function Bar({ name, value, unit = '', denom = 100, pass, idealLow, idealHigh, s
               title="理想レンジ（S）との差"
             >
               {gapText}
-            </div>
+                </div>
           )}
 
           {/* 理想レンジラベルは表示しない */}
-        </div>
-      </div>
+              </div>
+            </div>
 
       {/* 凡例は非表示 */}
     </div>
