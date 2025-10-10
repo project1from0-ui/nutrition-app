@@ -23,3 +23,13 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Hide floating Next.js devtools/toolbar button ("N" bubble) if present */
+button[aria-label="Open Next.js Toolbar"],
+button[aria-label="Open Next.js DevTools"],
+[data-nextjs-toolbar],
+[data-nextjs-toolbox],
+.nextjs-devtools-toggle,
+#__next-devtools-button__ {
+  display: none !important;
+}
