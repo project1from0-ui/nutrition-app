@@ -378,7 +378,7 @@ export default function Page() {
     if (currentSection === 'terms') setCurrentSection('login');
     else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('terms'); }
     else if (currentSection === 'health-settings') { setShowProfileForm(true); setCurrentSection('profile'); }
-    else if (currentSection === 'mode-select') { setCurrentSection('goal-select'); }
+    // mode-select 削除済み
     else if (currentSection === 'shop-select') { setCurrentSection('goal-select'); }
     else if (currentSection === 'goal-select') { setCurrentSection('health-settings'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
@@ -469,7 +469,7 @@ export default function Page() {
       {(() => {
         const activeGoal = (userProfile?.goal || goal || currentGoal);
         if (!activeGoal) return null;
-        if (!['mode-select','shop-select','results','menu-detail'].includes(currentSection)) return null;
+        if (!['shop-select','results','menu-detail'].includes(currentSection)) return null;
         const isDiet = activeGoal === 'diet';
         return (
           <div style={{
@@ -510,7 +510,7 @@ export default function Page() {
               setGoal(g);
               const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), goal: g };
               setUserProfile(profile);
-              setCurrentSection('mode-select');
+              setCurrentSection('shop-select');
             }}
               style={{ height:250, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:20,
                        border: goal==='diet'?'2px solid #22c55e':'2px solid #e0e0e0', borderRadius:12,
@@ -523,7 +523,7 @@ export default function Page() {
               setGoal(g);
               const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), goal: g };
               setUserProfile(profile);
-              setCurrentSection('mode-select');
+              setCurrentSection('shop-select');
             }}
               style={{ height:250, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:20,
                        border: goal==='bulk'?'2px solid #f97316':'2px solid #e0e0e0', borderRadius:12,
@@ -536,28 +536,6 @@ export default function Page() {
         </div>
       )}
 
-      {/* モード選択 */}
-      {currentSection === 'mode-select' && (
-        <div style={styles.card}>
-          <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>モードを選択</h1>
-          <div style={{ display:'flex', flexDirection:'column', gap:12, maxWidth:400, margin:'0 auto' }}>
-            <button type="button"
-              onClick={() => { /* 仮：何もしない */ }}
-              style={{ padding:20, border:'2px solid #e0e0e0', borderRadius:12,
-                       background:'#ffffff', color:'#666', fontWeight:700, cursor:'not-allowed' }}
-              disabled>
-              瞬殺モード
-            </button>
-            <button type="button"
-              onClick={() => setCurrentSection('shop-select')}
-              style={{ padding:20, height:180, display:'flex', alignItems:'center', justifyContent:'center', border:'2px solid #667eea', borderRadius:12,
-                       background:'#f0f4ff', color:'#4338ca', fontWeight:800, cursor:'pointer' }}>
-              検索モード
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* 規約 */}
       {currentSection === 'terms' && (
