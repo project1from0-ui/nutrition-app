@@ -4,9 +4,9 @@ import { useState, useEffect } from 'react';
 /* =========================
    Google Sheets 設定
 ========================= */
-const SPREADSHEET_ID = '1n9tChizEkER2ERdI2Ca8MMCAhEUXx1iKrCZDA1gDA3A';
-const API_KEY = 'AIzaSyC5VL8Mx5Doy3uVtSVZeThwMtXmi7u1LrM';
-const RANGE = 'A2:G2168';
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+const RANGE = process.env.SHEETS_RANGE;
 
 /* =========================
    S〜D判定レンジ（固定）
@@ -316,7 +316,44 @@ export default function Page() {
     else if (currentSection === 'menu-detail') { setCurrentSection('results'); setSelectedMenu(null); }
   };
 
-  const handleMenuClick = (menu) => { setSelectedMenu(menu); setCurrentSection('menu-detail'); };
+  const handleMenuClick = (menu) => { 
+    setSelectedMenu(menu); setCurrentSection('menu-detail');
+    fetchAiAdvice(menu, userProfile); 
+  };
+
+  // AIアドバイス
+  const [aiAdvice, setAiAdvice] = useState('');
+  const [isFetchingAdvice, setIsFetchingAdvice] = useState(false);
+  const fetchAiAdvice = async (menu, profile) => {
+    if (!menu || !profile) return;
+
+    setIsFetchingAdvice(true);
+    setAiAdvice(''); // Clear previous advice
+
+    try {
+      const response = await fetch('/api/advice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          profile: profile,
+          menu: menu,
+          grade: menu.letterGrade,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch advice');
+      }
+
+      const data = await response.json();
+      setAiAdvice(data.advice);
+    } catch (error) {
+      console.error('Error fetching AI advice:', error);
+      setAiAdvice('Sorry, we couldn\'t generate advice at this moment.');
+    } finally {
+      setIsFetchingAdvice(false);
+    }
+  };
 
   /* ============ 判定・整形（核心） ============ */
   const buildResults = (list, profile) => {
@@ -695,7 +732,7 @@ export default function Page() {
             </div>
             <div style={{ marginLeft: 24, flex: 1 }}>
               <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14 }}>
-                {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
+                {isFetchingAdvice ? 'AIがアドバイスを生成中...' : aiAdvice}
               </div>
             </div>
           </div>
