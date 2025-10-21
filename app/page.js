@@ -2,6 +2,10 @@
 import { getProfile } from "../lib/profile.js";
 import { getIdealRanges as getIdealRangesGoal } from "../lib/scoring.js";
 import { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
+
+// Google Mapsはクライアントサイドのみで動作するため、dynamic importを使用
+const GoogleMap = dynamic(() => import('./components/GoogleMap'), { ssr: false });
 
 /* =========================
    Google Sheets 設定
@@ -49,25 +53,7 @@ const countInRanges = (m, r) =>
   (inRange(m.fat,      r.fat)      ? 1 : 0) +
   (inRange(m.carbs,    r.carbs)    ? 1 : 0);
 
-// 汎用：指定レンジでS〜Dを返す（「AはS条件3項目以上」「BはA条件3項目以上」）
-const getLetterByRanges = (m, R) => {
-  if (allInRanges(m, R.S)) return 'S';
-  if (allInRanges(m, R.A) && countInRanges(m, R.S) >= 3) return 'A';
-  if (allInRanges(m, R.B) && countInRanges(m, R.A) >= 3) return 'B';
-  if (allInRanges(m, R.C)) return 'C';
-  return 'D';
-};
-
-// 理想中心への近さで並び替えのスコア（大→良）
-const closenessScore = (m, CENTER, width = {cal:200, pro:10, fat:10, carb:30}) => {
-  const norm = (v, c, w) => (v - c) / w; // 大まかな半幅
-  const e = norm(m.calories, CENTER.calories, width.cal);
-  const p = norm(m.protein,  CENTER.protein,  width.pro);
-  const f = norm(m.fat,      CENTER.fat,      width.fat);
-  const c = norm(m.carbs,    CENTER.carbs,    width.carb);
-  const dist2 = e*e + p*p + f*f + c*c;
-  return 10000 - Math.floor(dist2 * 10000);
-};
+// 等級・スコア機能は削除
 
 // === 等級フィルタとゴールから、判定に使うレンジを返す ===
 function getActiveRangesForJudge(goal, gradeFilter) {
@@ -92,87 +78,6 @@ function isMetricPass(value, activeRanges, metricKey) {
   return inRange(value, rng);
 }
 
-// 置換：ゆるめのナラティブ生成
-// 置換：少し長め＆栄養に軽く言及するナラティブ
-function buildMenuNarrative(menu, profile, gradeFilter) {
-  const goal = profile?.goal === 'diet' ? 'diet' : 'bulk';
-  const R = goal === 'diet' ? RANGES_DIET : RANGES_BULK;
-  const ideal = R.S; // 理想は常に S レンジ
-
-  const inR = (val, [lo, hi]) => Number.isFinite(val) && val >= lo && val <= hi;
-
-  const feel = (v, [lo, hi]) => {
-    if (!Number.isFinite(v)) return 'ちょうど';
-    const mid = (lo + hi) / 2;
-    const tol = (hi - lo) / 3;
-    if (v < mid - tol) return '控えめ';
-    if (v > mid + tol) return 'しっかりめ';
-    return 'ちょうど';
-  };
-
-  const kcalOk = inR(menu.calories, ideal.calories);
-  const proOk  = inR(menu.protein,  ideal.protein);
-  const fatOk  = inR(menu.fat,      ideal.fat);
-  const carbOk = inR(menu.carbs,    ideal.carbs);
-  const okCount = [kcalOk, proOk, fatOk, carbOk].filter(Boolean).length;
-
-  const kcalFeel = feel(menu.calories, ideal.calories);
-  const proFeel  = feel(menu.protein,  ideal.protein);
-  const fatFeel  = feel(menu.fat,      ideal.fat);
-  const carbFeel = feel(menu.carbs,    ideal.carbs);
-
-  let intro;
-  if (okCount >= 3) {
-    intro = '全体のまとまりがよく、狙いに寄り添いやすい一皿です。';
-  } else if (okCount === 2) {
-    intro = '良いところと気になるところが半々で、状況に合わせて使いやすい一皿です。';
-  } else {
-    intro = 'やや個性強めの配置で、好みやシーンによって評価が分かれそうな一皿です。';
-  }
-
-  const lightNutriLine = `エネルギーは${kcalFeel}、タンパク質は${proFeel}。脂質は${fatFeel}で、炭水化物は${carbFeel}の印象です。`;
-
-  let effect;
-  if (goal === 'bulk') {
-    if (proOk && kcalOk) {
-      effect = '筋合成と回復の下支えになりやすく、トレーニング日のメインにも馴染みます。';
-    } else if (proOk && !kcalOk) {
-      effect = '材料は入りやすい一方で、満足感はやや控えめに感じるかもしれません。';
-    } else if (!proOk && kcalOk) {
-      effect = 'エネルギーは乗りますが、材料面は細め。満腹感と狙いのバランスに好みが出そうです。';
-    } else {
-      effect = '満足感優先の組み合わせになりやすく、鍛える目的が強い場合は好みが分かれます。';
-    }
-  } else {
-    if (kcalOk && proOk && fatOk) {
-      effect = '軽さと満足感のバランスがよく、日常にも取り入れやすい整い方です。';
-    } else if (kcalOk && proOk) {
-      effect = '重すぎず材料は確保でき、体調を崩しにくい穏やかなまとまりです。';
-    } else if (kcalOk && !proOk) {
-      effect = 'さらっと食べやすい一方で、材料は控えめ。タイミングに合わせて選びたい一皿です。';
-    } else {
-      effect = '味や満足感を優先したい日に向いていて、軽さ重視のときは他候補も比較すると安心です。';
-    }
-  }
-
-  let wrap;
-  if (okCount >= 3) wrap = '気負わず選べる仕上がりなので、今の目的にスッと馴染みます。';
-  else if (okCount === 2) wrap = '小さな癖はありますが、使いどころを選べば心地よく収まりそうです。';
-  else wrap = '今日はこの雰囲気を楽しみつつ、別の選択肢も視野に入れると良さそうです。';
-
-  return `${intro}\n${lightNutriLine}\n${effect}\n${wrap}`;
-}
-
-const getGradeColor = (letter) => {
-  switch (letter) {
-    case 'S': return '#d4af37'; // gold
-    case 'A': return '#22c55e'; // green
-    case 'B': return '#fde047'; // light yellow
-    case 'C': return '#f97316'; // orange
-    default:  return '#ef4444'; // red
-  }
-};
-
 /* =========================
    データ取得
 ========================= */
@@ -180,9 +85,12 @@ const normalizeShop = (s) => (s || '')
   .replace(/\s/g, '')
   .replace(/\[[^\]]*\]/g, '')
   .toLowerCase();
-async function fetchMenuData() {
+async function fetchMenuData(classification = null) {
   try {
-    const res = await fetch('/api/menus', { cache: 'no-store' });
+    const url = classification
+      ? `/api/menus?classification=${encodeURIComponent(classification)}`
+      : '/api/menus';
+    const res = await fetch(url, { cache: 'no-store' });
     if (!res.ok) {
       console.error('APIレスポンスエラー:', res.status);
       return [];
@@ -199,27 +107,7 @@ async function fetchMenuData() {
 /* =========================
    UIコンポーネント
 ========================= */
-function Gauge({ letter, size=200 }) {
-  const strokeWidth = 16;
-  const r = (size - strokeWidth) / 2;
-  const cir = 2 * Math.PI * r;
-  const ratio = ({S:1, A:0.85, B:0.7, C:0.5, D:0.3}[letter]) ?? 0.3;
-  const color = getGradeColor(letter);
-  return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ display:'block', width:'100%', height:'auto', maxWidth:'140px' }} preserveAspectRatio="xMidYMid meet">
-      <circle cx={size/2} cy={size/2} r={r} fill="#ffffff" stroke="#e5e7eb" strokeWidth={strokeWidth}/>
-      <circle
-        cx={size/2} cy={size/2} r={r}
-        fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round"
-        strokeDasharray={cir} strokeDashoffset={cir*(1-ratio)}
-        transform={`rotate(-90 ${size/2} ${size/2})`}
-      />
-      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" fontSize="128" fontWeight="700" fill={color} dy="-5">
-        {letter}
-      </text>
-    </svg>
-  );
-}
+// Gauge, narrative and grade color removed per requirement
 
 function Stat({ labelJa, unit, val, pass }) {
   const valueColor = pass ? '#2563eb' : '#dc2626';
@@ -297,9 +185,14 @@ export default function Page() {
   const [birthYear, setBirthYear] = useState('2000');
   const [birthMonth, setBirthMonth] = useState('1');
   const [birthDay, setBirthDay] = useState('1');
-  const [gender, setGender] = useState('');
+  const [gender, setGender] = useState('male');
   const [height, setHeight] = useState('170');
   const [weight, setWeight] = useState('65'); // 65kgを初期値に
+  const [exerciseFrequency, setExerciseFrequency] = useState('ほとんど運動しない'); // 必須・4択（デフォルト選択）
+  const [exerciseTypesList, setExerciseTypesList] = useState(['ウォーキング','ランニング','ウェイトトレーニング','ヨガ','水泳','サイクリング','HIIT','球技']);
+  const [selectedExerciseTypes, setSelectedExerciseTypes] = useState([]);
+  const [healthNotes, setHealthNotes] = useState('');
+  const [agreeTerms, setAgreeTerms] = useState(true);
   const [goal, setGoal] = useState('');       // 'diet' | 'bulk'
 
   // 画面
@@ -320,10 +213,11 @@ export default function Page() {
   const [shopGenreFilter, setShopGenreFilter] = useState('ALL'); // 'ALL' | ジャンル名
   const [shopCategoryFilter, setShopCategoryFilter] = useState('ALL'); // 'ALL' | カテゴリ名
   const [shopSearchQuery, setShopSearchQuery] = useState(''); // 店名フリーワード検索
+  const [viewMode, setViewMode] = useState('list'); // 'list' | 'map'
 
   // 健康設定（オプション）
   const BASE_ALLERGIES = ['卵','乳','小麦','そば','落花生','えび','かに'];
-  const BASE_CONDITIONS = ['高血圧','糖尿病','脂質異常症','痛風・高尿酸血症','慢性腎臓病','心疾患','胃腸が弱い','妊娠・授乳中'];
+  const BASE_CONDITIONS = ['高血圧','糖尿病','脂質異常症','痛風・高尿酸血症','慢性腎臓病','心疾患','妊娠・授乳中'];
   const [allergyList, setAllergyList] = useState(BASE_ALLERGIES);
   const [conditionList, setConditionList] = useState(BASE_CONDITIONS);
   const [selectedAllergies, setSelectedAllergies] = useState([]);
@@ -355,14 +249,8 @@ export default function Page() {
     }
   }, [currentSection, isClient]);
 
-  const handleLogin = () => setCurrentSection('terms');
+  const handleLogin = () => { setShowProfileForm(true); setCurrentSection('profile'); };
 
-  const handleTermsAgree = () => {
-    const agreed = document.getElementById('agreeTerms')?.checked;
-    if (!agreed) return alert('利用規約に同意してください。');
-    setShowProfileForm(true);
-    setCurrentSection('profile');
-  };
 
   const handleSearch = () => {
     if (!birthYear || !birthMonth || !birthDay || !gender || !height || !weight) {
@@ -371,18 +259,17 @@ export default function Page() {
     }
     // プロフィール入力の次は目的選択へ
     setShowProfileForm(false);
-    setCurrentSection('health-settings');
+    setCurrentSection('goal-select');
   };
 
   const handleBack = () => {
     if (currentSection === 'terms') setCurrentSection('login');
-    else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('terms'); }
-    else if (currentSection === 'health-settings') { setShowProfileForm(true); setCurrentSection('profile'); }
-    // mode-select 削除済み
+    else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('login'); }
+    else if (currentSection === 'mode-select') { setCurrentSection('goal-select'); }
     else if (currentSection === 'shop-select') { setCurrentSection('goal-select'); }
-    else if (currentSection === 'goal-select') { setCurrentSection('health-settings'); }
+    else if (currentSection === 'goal-select') { setShowProfileForm(true); setCurrentSection('profile'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
-    else if (currentSection === 'menu-detail') { setCurrentSection('results'); setSelectedMenu(null); }
+    else if (currentSection === 'menu-detail') { setCurrentSection('shop-select'); setSelectedMenu(null); }
   };
 
   const handleMenuClick = (menu) => { setSelectedMenu(menu); setCurrentSection('menu-detail'); };
@@ -392,21 +279,15 @@ export default function Page() {
     const isBulk = (profile.goal === 'bulk') || (currentGoal === 'bulk');
     const R = isBulk ? RANGES_BULK : RANGES_DIET;
     const CENTER = isBulk ? BULK_CENTER : DIET_CENTER;
-    const enriched = list.map(m => ({
-      ...m,
-      letterGrade: getLetterByRanges(m, R),
-      score: closenessScore(m, CENTER, isBulk ? {cal:200,pro:10,fat:10,carb:30} : {cal:100,pro:10,fat:6,carb:20})
-    }));
-    // S→A→B→C→D、同一等級内は理想中心に近い順
-    const order = { S:0, A:1, B:2, C:3, D:4 };
-    enriched.sort((a,b) => (order[a.letterGrade]-order[b.letterGrade]) || (b.score - a.score));
-    return enriched;
+    // 评分・スコアを廃止。単純な並び（カロリー昇順）に変更
+    const simple = [...list].sort((a,b) => (a.calories ?? 0) - (b.calories ?? 0));
+    return simple;
   };
 
   const styles = {
     container: {
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'transparent',
       padding: 20,
       fontFamily: 'system-ui, -apple-system, sans-serif'
     },
@@ -470,31 +351,28 @@ export default function Page() {
         const activeGoal = (userProfile?.goal || goal || currentGoal);
         if (!activeGoal) return null;
         if (!['shop-select','results','menu-detail'].includes(currentSection)) return null;
-        const isDiet = activeGoal === 'diet';
+        const map = {
+          diet:  { label: '減量モード',     bg: '#dcfce7', color: '#166534' },
+          stay:  { label: '現状維持モード', bg: '#e5e7eb', color: '#111827' },
+          bulk:  { label: 'バルクアップモード', bg: '#fff7ed', color: '#9a3412' },
+          cheat: { label: 'チートモード',   bg: '#fffbeb', color: '#92400e' },
+        };
+        const style = map[activeGoal] || map.diet;
         return (
           <div style={{
-            position:'fixed',
-            top: 12,
-            right: 16,
-            zIndex: 1000,
-            padding: '6px 10px',
-            borderRadius: 999,
-            fontWeight: 800,
-            fontSize: 12,
-            background: isDiet ? '#dcfce7' : '#fff7ed',
-            color: isDiet ? '#166534' : '#9a3412',
-            border: '1px solid #e5e7eb',
+            position:'fixed', top:12, left:'50%', transform:'translateX(-50%)',
+            zIndex:1000, fontWeight:900, fontSize:24, color:'#111827'
           }}>
-            {isDiet ? 'ダイエットモード' : 'バルクアップモード'}
+            {style.label}
           </div>
         );
       })()}
       {/* ログイン */}
       {currentSection === 'login' && (
         <div style={styles.card}>
-          <h1 style={styles.title}>🥗 栄養成分検索アプリ</h1>
-          <p style={{ textAlign:'center', color:'#666', marginBottom: 30 }}>目的に合った最適なメニューを見つけよう</p>
-          <button style={styles.button} onClick={handleLogin}>Googleアカウントでログイン</button>
+          <h1 style={{ ...styles.title, fontSize: 64 }}>BULK</h1>
+          <p style={{ textAlign:'center', color:'#666', marginBottom: 30 }}>最適な食事をAIで見つけよう</p>
+          <button style={styles.button} onClick={handleLogin}>Start</button>
         </div>
       )}
 
@@ -504,32 +382,66 @@ export default function Page() {
           <button onClick={handleBack} style={styles.backButton}>←</button>
           <h1 style={styles.title}>食事の目的</h1>
           <p style={{ textAlign:'center', color:'#666', marginBottom:20 }}>この目的は一覧の並びや判定に使われます</p>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(2, 1fr)', gap:12, maxWidth:480, margin:'0 auto 16px' }}>
-            <button type="button" onClick={() => {
+          <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:12, maxWidth:480, margin:'0 auto 16px' }}>
+            <button type="button" onClick={async () => {
               const g = 'diet';
               setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), goal: g };
+              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
               setUserProfile(profile);
+              // 減量メニューのみ取得
+              const data = await fetchMenuData('減量');
+              setMenuData(data);
               setCurrentSection('shop-select');
             }}
-              style={{ height:250, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:20,
+              style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='diet'?'2px solid #22c55e':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='diet'?'#f0fdf4':'white', color: goal==='diet'?'#166534':'#666', fontWeight: 700 }}>
-              <div style={{ fontSize:24, marginBottom:8 }}>🥗</div>
-              ダイエット
+              減量
             </button>
-            <button type="button" onClick={() => {
-              const g = 'bulk';
+            <button type="button" onClick={async () => {
+              const g = 'stay';
               setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), goal: g };
+              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
               setUserProfile(profile);
+              // 現状維持メニューのみ取得
+              const data = await fetchMenuData('現状維持');
+              setMenuData(data);
               setCurrentSection('shop-select');
             }}
-              style={{ height:250, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:20,
+              style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
+                       border: goal==='stay'?'2px solid #60a5fa':'2px solid #e0e0e0', borderRadius:12,
+                       background: goal==='stay'?'#eff6ff':'white', color: goal==='stay'?'#1e3a8a':'#666', fontWeight: 700 }}>
+              現状維持
+            </button>
+            <button type="button" onClick={async () => {
+              const g = 'bulk';
+              setGoal(g);
+              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
+              setUserProfile(profile);
+              // バルクアップメニューのみ取得
+              const data = await fetchMenuData('バルクアップ');
+              setMenuData(data);
+              setCurrentSection('shop-select');
+            }}
+              style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='bulk'?'2px solid #f97316':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='bulk'?'#fff7ed':'white', color: goal==='bulk'?'#9a3412':'#666', fontWeight: 700 }}>
-              <div style={{ fontSize:24, marginBottom:8 }}>💪</div>
               バルクアップ
+            </button>
+            <button type="button" onClick={async () => {
+              const g = 'cheat';
+              setGoal(g);
+              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
+              setUserProfile(profile);
+              // チートメニューのみ取得
+              const data = await fetchMenuData('チート');
+              setMenuData(data);
+              setCurrentSection('shop-select');
+            }}
+              style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
+                       border: goal==='cheat'?'2px solid #f59e0b':'2px solid #e0e0e0', borderRadius:12,
+                       background: goal==='cheat'?'#fffbeb':'white', color: goal==='cheat'?'#92400e':'#666', fontWeight: 700 }}>
+              チート
             </button>
           </div>
           {/* 目的決定ボタンは廃止し、各ボタンで直接遷移 */}
@@ -537,29 +449,12 @@ export default function Page() {
       )}
 
 
-      {/* 規約 */}
-      {currentSection === 'terms' && (
-       <div style={styles.card}>
-          <h1 style={styles.title}>利用規約への同意</h1>
-          <div style={{ background:'#f5f5f5', padding:20, borderRadius:10, marginBottom:20, maxHeight:200, overflowY:'auto' }}>
-            <p style={{ lineHeight:1.6, color:'#666' }}>
-              1. 個人情報は栄養計算のみに使用します。<br/>
-              2. データはブラウザのローカルに保存されます。<br/>
-              3. 栄養情報は参考値であり医学的助言ではありません。<br/>
-              4. 著作権は開発者に帰属します。
-            </p>
-          </div>
-          <div style={{ marginBottom:20 }}>
-            <input type="checkbox" id="agreeTerms" style={{ marginRight:10 }}/>
-            <label htmlFor="agreeTerms">上記の利用規約に同意します</label>
-          </div>
-          <button style={styles.button} onClick={handleTermsAgree}>次へ進む</button>
-        </div>
-      )}
+      {/* 規約はプロフィールページ下部へ統合 */}
 
       {/* プロフィール */}
       {currentSection === 'profile' && showProfileForm && (
        <div style={styles.card}>
+         <button onClick={handleBack} style={styles.backButton}>←</button>
          <h1 style={styles.title}>プロフィール設定</h1>
           
           {/* 生年月日 */}
@@ -617,107 +512,127 @@ export default function Page() {
             </select>
           </div>
 
+          {/* 運動頻度（必須） */}
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>運動頻度 <span style={{ color:'red' }}>*</span></label>
+            <select value={exerciseFrequency} onChange={e=>setExerciseFrequency(e.target.value)} style={styles.input}>
+              <option value="">選択してください</option>
+              <option value="ほとんど運動しない">ほとんど運動しない</option>
+              <option value="週1〜2回程度">週1〜2回程度</option>
+              <option value="週3〜5回程度">週3〜5回程度</option>
+              <option value="ほぼ毎日する">ほぼ毎日する</option>
+            </select>
+          </div>
+
+          {/* 運動種類（チップ複数可） */}
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>運動の種類（任意）</label>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              {exerciseTypesList.map(name => {
+                const active = selectedExerciseTypes.includes(name);
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => setSelectedExerciseTypes(prev => active ? prev.filter(x=>x!==name) : [...prev, name])}
+                    style={{
+                      padding:'6px 10px', borderRadius:999,
+                      border: `2px solid ${active ? '#22c55e' : '#e5e7eb'}`,
+                      background: active ? '#dcfce7' : '#fff',
+                      color: active ? '#166534' : '#374151',
+                      fontWeight:800, fontSize:12,
+                      cursor:'pointer'
+                    }}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  const label = prompt('その他の運動を入力');
+                  const v = (label||'').trim();
+                  if (!v) return;
+                  if (!exerciseTypesList.includes(v)) setExerciseTypesList([...exerciseTypesList, v]);
+                  if (!selectedExerciseTypes.includes(v)) setSelectedExerciseTypes([...selectedExerciseTypes, v]);
+                }}
+                style={{ padding:'6px 10px', borderRadius:999, border:'2px dashed #cbd5e1', background:'#fff', color:'#334155', fontWeight:800, fontSize:12 }}
+              >
+                ＋
+              </button>
+            </div>
+          </div>
+
+          {/* オプション（任意） → 表示ラベルは削除し、疾患のみ任意で表示 */}
+          <div style={{ marginBottom:12 }}>
+            {/* 疾患（任意） */}
+            <div style={{ marginBottom:8 }}>
+              <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>疾患（任意）</label>
+              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                {conditionList.map(name => {
+                  const active = selectedConditions.includes(name);
+                  return (
+                    <button key={name} type="button" onClick={() => {
+                        setSelectedConditions(prev => active ? prev.filter(x=>x!==name) : [...prev, name]);
+                      }}
+                      style={{ padding:'6px 10px', borderRadius:999, border:`2px solid ${active?'#06b6d4':'#e5e7eb'}`,
+                               background: active?'#cffafe':'#fff', color: active?'#0e7490':'#374151', fontWeight:800, fontSize:12 }}>
+                      {name}
+                    </button>
+                  );
+                })}
+                <button type="button" onClick={() => {
+                const label = prompt('その他の疾患を入力');
+                  const v = (label||'').trim();
+                  if (!v) return;
+                  if (!conditionList.includes(v)) setConditionList([...conditionList, v]);
+                  if (!selectedConditions.includes(v)) setSelectedConditions([...selectedConditions, v]);
+                }}
+                  style={{ padding:'6px 10px', borderRadius:999, border:'2px dashed #cbd5e1', background:'#fff', color:'#334155', fontWeight:800, fontSize:12 }}>＋</button>
+              </div>
+            </div>
+          </div>
+
+          {/* 食事のこだわり（任意・自由記述） */}
+          <div style={{ marginBottom:20 }}>
+            <label style={{ display:'block', marginBottom:8, fontWeight:'bold' }}>食事のこだわり（任意）</label>
+            <textarea
+              value={healthNotes}
+              onChange={e=>setHealthNotes(e.target.value)}
+              placeholder="例）太ることを気にして普段から糖質を控えるようにしてい"
+              rows={3}
+              style={{ width:'100%', padding:12, border:'2px solid #e0e0e0', borderRadius:8, fontSize:14 }}
+            />
+          </div>
+
+          {/* 規約文は非表示にし、同意チェックのみ表示 */}
+          <div style={{ marginBottom:8, display:'flex', justifyContent:'center', alignItems:'center' }}>
+            <input type="checkbox" id="agreeTermsProfile" checked={agreeTerms} onChange={e=>setAgreeTerms(e.target.checked)} style={{ marginRight:10 }} required/>
+            <label htmlFor="agreeTermsProfile">AIによるデータ利用に同意します <span style={{ color:'red' }}>*</span></label>
+          </div>
+
           {/* 目的は別ステップへ移動 */}
 
           <button onClick={handleSearch}
             style={{ ...styles.button,
-              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight) ? 0.5 : 1,
-              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight) ? 'not-allowed' : 'pointer'
+              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms) ? 0.5 : 1,
+              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms) ? 'not-allowed' : 'pointer'
             }}
-            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight}
+            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms}
           >
             決定
           </button>
         </div>
       )}
 
-      {/* 健康設定（オプション） */}
-      {currentSection === 'health-settings' && (
-        <div style={styles.card}>
-          <button onClick={handleBack} style={styles.backButton}>←</button>
-          {/* 左上スキップ（前へ進む） */}
-          <button onClick={() => setCurrentSection('goal-select')}
-            style={{ position:'fixed', top:12, right:16, zIndex:1000, padding:'6px 10px', borderRadius:999,
-                     background:'#ffffff', border:'1px solid #e5e7eb', color:'#374151', fontWeight:800, fontSize:12, cursor:'pointer' }}>スキップ</button>
-          <h1 style={styles.title}>オプション設定</h1>
-
-          {/* 1) アレルギー */}
-          <section style={{ marginTop: 12, marginBottom: 20 }}>
-            <h2 style={{ fontSize:18, fontWeight:700, marginBottom:8 }}>アレルギー</h2>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:8 }}>
-              {allergyList.map(name => {
-                const active = selectedAllergies.includes(name);
-                return (
-                  <button key={name} type="button" onClick={() => {
-                      setSelectedAllergies(prev => active ? prev.filter(x=>x!==name) : [...prev, name]);
-                    }}
-                    style={{ padding:'6px 10px', borderRadius:999, border:`2px solid ${active?'#ef4444':'#e5e7eb'}`,
-                             background: active?'#fee2e2':'#fff', color: active?'#991b1b':'#374151', fontWeight:800, fontSize:12 }}>
-                    {name}
-                  </button>
-                );
-              })}
-              <button type="button" onClick={() => {
-                const label = prompt('その他のアレルギーを入力');
-                const v = (label||'').trim();
-                if (!v) return;
-                if (!allergyList.includes(v)) setAllergyList([...allergyList, v]);
-                if (!selectedAllergies.includes(v)) setSelectedAllergies([...selectedAllergies, v]);
-              }}
-                style={{ padding:'6px 10px', borderRadius:999, border:'2px dashed #cbd5e1', background:'#fff', color:'#334155', fontWeight:800, fontSize:12 }}>＋</button>
-            </div>
-          </section>
-
-          {/* 2) 持病 */}
-          <section style={{ marginBottom: 20 }}>
-            <h2 style={{ fontSize:18, fontWeight:700, marginBottom:8 }}>持病</h2>
-            <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:8 }}>
-              {conditionList.map(name => {
-                const active = selectedConditions.includes(name);
-                return (
-                  <button key={name} type="button" onClick={() => {
-                      setSelectedConditions(prev => active ? prev.filter(x=>x!==name) : [...prev, name]);
-                    }}
-                    style={{ padding:'6px 10px', borderRadius:999, border:`2px solid ${active?'#06b6d4':'#e5e7eb'}`,
-                             background: active?'#cffafe':'#fff', color: active?'#0e7490':'#374151', fontWeight:800, fontSize:12 }}>
-                    {name}
-                  </button>
-                );
-              })}
-              <button type="button" onClick={() => {
-                const label = prompt('その他の持病を入力');
-                const v = (label||'').trim();
-                if (!v) return;
-                if (!conditionList.includes(v)) setConditionList([...conditionList, v]);
-                if (!selectedConditions.includes(v)) setSelectedConditions([...selectedConditions, v]);
-              }}
-                style={{ padding:'6px 10px', borderRadius:999, border:'2px dashed #cbd5e1', background:'#fff', color:'#334155', fontWeight:800, fontSize:12 }}>＋</button>
-            </div>
-          </section>
-
-          {/* 決定ボタン（プロフィールページと同じ見た目・中央配置） */}
-          <button onClick={() => {
-              try {
-                const saved = JSON.parse(localStorage.getItem('nutrition_profile') || '{}');
-                saved.health = {
-                  allergies: selectedAllergies,
-                  conditions: selectedConditions,
-                };
-                localStorage.setItem('nutrition_profile', JSON.stringify(saved));
-              } catch {}
-              setCurrentSection('goal-select');
-            }}
-            style={{ ...styles.button, maxWidth: 360 }}>
-            決定
-          </button>
-        </div>
-      )}
+      {/* 健康設定（オプション）はプロフィール直下へ統合済み */}
 
       {/* 店舗選択 */}
       {currentSection === 'shop-select' && (
-        <div style={styles.card}>
+        <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>店を選択</h1>
+          <h1 style={styles.title}>あなたに最適なメニューを解析</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -737,69 +652,49 @@ export default function Page() {
             const queryNorm = normalizeShop(shopSearchQuery || '');
             return (
               <div>
-                <p style={{ textAlign:'center', color:'#666', marginBottom:20 }}>
-                  栄養情報を見たい店舗を選んでください（全{total}チェーン）
-                </p>
-                {/* ジャンル選択ロール（プルダウン） */}
-                <div className="genre-filter" style={{ display:'flex', justifyContent:'center', marginBottom:12 }}>
-                  <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-                    <span style={{ fontWeight:700, color:'#374151' }}>ジャンルで絞る</span>
-                    <select value={shopGenreFilter} onChange={e=>setShopGenreFilter(e.target.value)}
-                      style={{ height:32, padding:'2px 8px', border:'1px solid #e5e7eb', borderRadius:8, width:120, minWidth:120, fontSize:12 }}>
-                      <option value="ALL">ALL</option>
-                      {genreList.map(g => (
-                        <option key={g} value={g}>{g}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                {/* 店名フリーワード検索 */}
-                <div className="shop-search" style={{ display:'flex', justifyContent:'center', marginBottom:12 }}>
-                  <input
-                    value={shopSearchQuery}
-                    onChange={e=>setShopSearchQuery(e.target.value)}
-                    placeholder="店名で検索..."
-                    style={{ width:'100%', maxWidth:400, padding:8, border:'1px solid #e5e7eb', borderRadius:8 }}
-                  />
-                </div>
-                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                  {groupsToShow
-                    .map(([genre, shops]) => [genre, queryNorm ? shops.filter(s => normalizeShop(s).includes(queryNorm)) : shops])
-                    .filter(([, shops]) => shops.length > 0)
-                    .map(([genre, shops]) => (
-                    <section key={genre} style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                      <h2 style={{ fontSize:18, fontWeight:700, color:'#111827' }}>{'【' + genre + '】'}</h2>
-                      <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:10, width:'100%', maxWidth:400, margin:'0 auto' }}>
-                        {shops.map((shop) => (
-                          <button key={shop}
-                            onClick={() => {
-                              setSelectedShop(shop);
-                              const filtered = menuData.filter(item =>
-                                normalizeShop(item.shop).includes(normalizeShop(shop))
-                              );
-                              if (filtered.length === 0) return alert('この店舗のデータが見つかりません');
-                              const results = buildResults(filtered, userProfile);
-                              setScoredMenus(results);
-                              setGradeFilter('ALL');
-                              setShopCategoryFilter('ALL');
-                              setCurrentSection('results');
-                            }}
-                            style={{
-                              width:'100%', height:60,
-                              display:'flex', alignItems:'center', justifyContent:'center',
-                              padding:15, background:'white', border:'2px solid #e0e0e0', borderRadius:10,
-                              fontSize:14, fontWeight:'bold', cursor:'pointer',
-                              whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', boxSizing:'border-box'
-                            }}
-                            onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.background='#f0f4ff'; }}
-                            onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e0e0e0'; e.currentTarget.style.background='white'; }}
-                          >
-                            {shop}
-                          </button>
-                        ))}
-                      </div>
-                    </section>
-                  ))}
+                
+                {/* 店名で検索は削除 */}
+
+                {/* 地図表示 */}
+                {isClient && (
+                  <div style={{ marginBottom: 24 }}>
+                    <GoogleMap
+                      menuData={menuData}
+                      onShopClick={(shop) => {
+                        setSelectedShop(shop);
+                        const filtered = menuData.filter(item =>
+                          normalizeShop(item.shop).includes(normalizeShop(shop))
+                        );
+                        if (filtered.length === 0) return alert('この店舗のデータが見つかりません');
+                        const results = buildResults(filtered, userProfile);
+                        setScoredMenus(results);
+                        setGradeFilter('ALL');
+                        setShopCategoryFilter('ALL');
+                        setCurrentSection('menu-detail');
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* メニュー一覧（シンプルなラベルのみ） */}
+                <div style={{ marginTop: 20 }}>
+                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16, textAlign: 'center' }}>メニュー一覧</h2>
+                  <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto' }}>
+                    {menuData.map((m, i) => (
+                      <button
+                        key={`${m.shop}-${m.menu}-${i}`}
+                        onClick={() => { setSelectedMenu(m); setCurrentSection('menu-detail'); }}
+                        style={{
+                          padding:8, border:'1px solid #e5e7eb', borderRadius:8, background:'#fff',
+                          color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer'
+                        }}
+                        onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.background='#f0f4ff'; }}
+                        onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.background='#fff'; }}
+                      >
+                        {`${m.shop || ''}  -  ${m.menu || ''}`}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             );
@@ -847,7 +742,7 @@ export default function Page() {
           {/* プロフィール表示は非表示 */}
 
           <div className="menu-list" style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {(gradeFilter==='ALL' ? scoredMenus : scoredMenus.filter(m => m.letterGrade===gradeFilter))
+            {(scoredMenus)
               .filter(m => shopCategoryFilter==='ALL' ? true : (m.category || '').trim() === shopCategoryFilter)
               .map((m, i) => (
               <button key={`${m.menu}-${i}`} onClick={()=>handleMenuClick(m)}
@@ -861,20 +756,7 @@ export default function Page() {
                 onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; }}
                 onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.04)'; }}
               >
-                <div className="rank-badge" style={{ 
-                  position:'absolute', 
-                  top:8, 
-                  left:8, 
-                  width:24, 
-                  height:24, 
-                  background:'linear-gradient(135deg, #667eea, #764ba2)', 
-                  borderRadius:'50%', 
-                  color:'#fff', 
-                  display:'grid', 
-                  placeItems:'center', 
-                  fontWeight:700, 
-                  fontSize:10
-                }}>{i+1}位</div>
+                
                 <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
               </button>
             ))}
@@ -891,29 +773,7 @@ export default function Page() {
             <p style={{ textAlign:'center', color:'#666', marginBottom:30, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
           </div>
 
-          {/* 評価ゲージ */}
-          <div style={{ display:'flex', justifyContent:'center', marginBottom:24, position:'relative' }}>
-            <div style={{ position:'relative' }}>
-              <div style={{
-                position:'absolute', 
-                top:-12, 
-                left:-20, 
-                fontSize:16, 
-                fontWeight:'bold', 
-                color:'#333',
-                background:'#fff',
-                padding:'4px 8px',
-                borderRadius:'6px',
-                border:'1px solid #e5e7eb',
-                zIndex:10
-              }}>
-                AI総合評価
-              </div>
-              <div style={{ width:140, height:140 }}>
-                <Gauge letter={selectedMenu.letterGrade}/>
-              </div>
-            </div>
-              </div>
+          {/* 評価ゲージ削除 */}
               
           {/* 栄養表示 */}
           <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
@@ -975,29 +835,7 @@ export default function Page() {
             })()}
           </div>
 
-          {/* AI評価 */}
-          <div style={{ position:'relative', marginTop: '16px' }}>
-            <div style={{ 
-              position:'absolute', 
-              top:-20, 
-              left:-12, 
-              fontSize:14, 
-              fontWeight:700, 
-              color:'#111827',
-              background:'#fff',
-              padding:'4px 8px',
-              borderRadius:'4px',
-              border:'1px solid #e5e7eb',
-              zIndex:10
-            }}>
-              AI論評
-                  </div>
-            <div style={{ ...styles.aiEvalCard }}>
-              <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: '#374151', fontSize: 14, paddingTop: '40px' }}>
-                {buildMenuNarrative(selectedMenu, userProfile, gradeFilter)}
-              </div>
-            </div>
-          </div>
+          {/* AI評価削除 */}
         </div>
       )}
     </div>

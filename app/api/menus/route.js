@@ -1,117 +1,117 @@
 // app/api/menus/route.js
 import { NextResponse } from 'next/server';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-export async function GET() {
-  const API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
-  const SHEET_ID = process.env.SPREADSHEET_ID;
-  const RANGE = process.env.SHEETS_RANGE || 'A1:H';
+// Firebase Admin初期化（サーバーサイド専用）
+function getFirebaseAdmin() {
+  if (getApps().length === 0) {
+    // 環境変数から認証情報を取得
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
-  console.log('[ENV CHECK]', {
-    hasKey: !!API_KEY,
-    hasSheet: !!SHEET_ID,
-    range: RANGE,
-  });
-
-  if (!API_KEY || !SHEET_ID) {
-    return NextResponse.json({ error: 'Missing env' }, { status: 500 });
-  }
-
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(RANGE)}?key=${API_KEY}`;
-
-  try {
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      console.error('Sheets error', res.status, text);
-      return NextResponse.json({ error: 'Sheets error', status: res.status }, { status: 500 });
+    if (!privateKey || !clientEmail || !projectId) {
+      throw new Error('Firebase Admin credentials are missing');
     }
 
-    const data = await res.json();
-    const values = Array.isArray(data.values) ? data.values : [];
-    if (values.length === 0) {
+    initializeApp({
+      credential: cert({
+        projectId,
+        clientEmail,
+        privateKey,
+      }),
+    });
+  }
+  return getFirestore();
+}
+
+export async function GET(request) {
+  try {
+    const db = getFirebaseAdmin();
+
+    // クエリパラメータから classification を取得
+    const { searchParams } = new URL(request.url);
+    const classification = searchParams.get('classification');
+
+    console.log('[Firestore Query]', { classification: classification || 'all' });
+
+    // Firestoreクエリ
+    let query = db.collection('menuItemsHirokojiClass');
+
+    // classificationが指定されていればフィルタリング
+    if (classification) {
+      query = query.where('classification', '==', classification);
+    }
+
+    const snapshot = await query.get();
+
+    if (snapshot.empty) {
+      console.log('No menu items found in Firestore');
       return NextResponse.json([], { status: 200 });
     }
 
-    // ---- header-based mapping ----
-    const header = values[0].map(h => (h ?? '').trim());
-    const rowsRaw = values.slice(1);
-    const idx = (name) => header.findIndex(h => h === name);
-    const pick = (row, name) => {
-      const i = idx(name);
-      return i >= 0 ? String(row[i] ?? '').trim() : '';
-    };
-    const toNumber = (s) => {
-      const n = Number(String(s).replace(/[, ]/g, ''));
-      return Number.isFinite(n) ? n : NaN;
-    };
+    // Firestoreデータをフロントエンド互換形式に変換
+    const menus = snapshot.docs.map(doc => {
+      const data = doc.data();
 
-    // 必須ヘッダー（シートの1行目に完全一致）
-    const required = [
-      'ジャンル',
-      '店名',
-      'カテゴリー',
-      'メニュー名',
-      'エネルギー(kcal)',
-      'たんぱく質(g)',
-      '脂質(g)',
-      '炭水化物(g)',
-    ];
-    const missing = required.filter(h => idx(h) === -1);
-    if (missing.length) {
-      console.error('MissingHeaders', missing);
-      return NextResponse.json({ error: `MissingHeaders: ${missing.join(',')}` }, { status: 500 });
-    }
+      return {
+        // 既存フロントエンド互換キー
+        shop: data.restaurantName || '',
+        category: data.category || '',
+        menu: data.menuName || '',
+        calories: data.nutrition?.calories || 0,
+        protein: data.nutrition?.protein || 0,
+        fat: data.nutrition?.fat || 0,
+        carbs: data.nutrition?.carbs || 0,
+        salt: data.nutrition?.salt || 0,
 
+        // 新規追加フィールド
+        genre: data.genre || '',
+        classification: data.classification || '',
+        price: data.price || 0,
+
+        // 位置情報（GeoPoint型の場合）
+        latitude: data.location?._latitude || data.latitude || null,
+        longitude: data.location?._longitude || data.longitude || null,
+
+        // 内部用
+        id: doc.id,
+
+        // サイズは固定値（後で必要に応じて調整）
+        size: '-',
+      };
+    });
+
+    // 除外フィルター（既存ロジックを維持）
     const excludeKeywords = [
       '調味料','ドリンク','飲み物','ソース','タレ','飲料','ジュース','コーヒー','お茶','水',
       'ケチャップ','マスタード','マヨネーズ','醤油','味噌','塩','胡椒','スパイス','香辛料'
     ];
 
-    const rows = rowsRaw
-      // 除外ワードは「メニュー名」に対して判定
-      .filter(r => {
-        const menuName = pick(r, 'メニュー名');
-        const lower = (menuName || '').toLowerCase();
-        return !excludeKeywords.some(k => lower.includes(k.toLowerCase()));
-      })
-      .map(r => {
-        const genre  = pick(r, 'ジャンル');
-        const shop   = pick(r, '店名');
-        const cat    = pick(r, 'カテゴリー');
-        const menu   = pick(r, 'メニュー名');
-        const kcal   = toNumber(pick(r, 'エネルギー(kcal)'));
-        const p      = toNumber(pick(r, 'たんぱく質(g)'));
-        const f      = toNumber(pick(r, '脂質(g)'));
-        const c      = toNumber(pick(r, '炭水化物(g)'));
-        return {
-          // 既存フロント互換キー
-          shop: shop,
-          category: cat,
-          menu: menu,
-          calories: kcal,
-          protein: p,
-          fat: f,
-          carbs: c,
-          size: '-',
-          salt: 0,
-          // 追加：ジャンル（見出し用）
-          genre: genre,
-        };
-      })
-      .filter(m =>
-        Number.isFinite(m.calories) &&
-        Number.isFinite(m.protein)  &&
-        Number.isFinite(m.fat)      &&
-        Number.isFinite(m.carbs)
-      );
+    const filteredMenus = menus.filter(m => {
+      const menuName = (m.menu || '').toLowerCase();
+      return !excludeKeywords.some(k => menuName.includes(k.toLowerCase()));
+    });
 
-    return NextResponse.json(rows, { status: 200 });
-  } catch (e) {
-    console.error('Fetch failed', e);
-    return NextResponse.json({ error: 'Fetch failed' }, { status: 500 });
+    console.log(`[Firestore] Fetched ${filteredMenus.length} menu items (classification: ${classification || 'all'})`);
+
+    return NextResponse.json(filteredMenus, {
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
+
+  } catch (error) {
+    console.error('[Firestore Error]', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch menus from Firestore', details: error.message },
+      { status: 500 }
+    );
   }
 }
