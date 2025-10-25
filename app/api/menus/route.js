@@ -40,52 +40,61 @@ export async function GET(request) {
 
     console.log('[Firestore Query]', { classification: classification || 'all' });
 
-    // Firestoreクエリ
-    let query = db.collection('menuItemsHirokojiClass');
+    // 2つのコレクションからデータを取得
+    const collections = ['menuItemsHirokojiClass', 'menuItemsHirokojiUnofficial'];
+    const allMenus = [];
 
-    // classificationが指定されていればフィルタリング
-    if (classification) {
-      query = query.where('classification', '==', classification);
+    for (const collectionName of collections) {
+      let query = db.collection(collectionName);
+
+      // classificationが指定されていればフィルタリング
+      if (classification) {
+        query = query.where('classification', '==', classification);
+      }
+
+      const snapshot = await query.get();
+      console.log(`[Firestore] ${collectionName}: ${snapshot.docs.length} documents`);
+
+      // Firestoreデータをフロントエンド互換形式に変換
+      const menus = snapshot.docs.map(doc => {
+        const data = doc.data();
+
+        return {
+          // 既存フロントエンド互換キー
+          shop: data.restaurantName || '',
+          category: data.category || '',
+          menu: data.menuName || '',
+          calories: data.nutrition?.calories || 0,
+          protein: data.nutrition?.protein || 0,
+          fat: data.nutrition?.fat || 0,
+          carbs: data.nutrition?.carbs || 0,
+          salt: data.nutrition?.salt || 0,
+
+          // 新規追加フィールド
+          genre: data.genre || '',
+          classification: data.classification || '',
+          price: data.price || 0,
+
+          // 位置情報（GeoPoint型の場合）
+          latitude: data.location?._latitude || data.latitude || null,
+          longitude: data.location?._longitude || data.longitude || null,
+
+          // 内部用
+          id: doc.id,
+          source: collectionName, // どのコレクションから取得したかを記録
+
+          // サイズは固定値（後で必要に応じて調整）
+          size: '-',
+        };
+      });
+
+      allMenus.push(...menus);
     }
 
-    const snapshot = await query.get();
-
-    if (snapshot.empty) {
+    if (allMenus.length === 0) {
       console.log('No menu items found in Firestore');
       return NextResponse.json([], { status: 200 });
     }
-
-    // Firestoreデータをフロントエンド互換形式に変換
-    const menus = snapshot.docs.map(doc => {
-      const data = doc.data();
-
-      return {
-        // 既存フロントエンド互換キー
-        shop: data.restaurantName || '',
-        category: data.category || '',
-        menu: data.menuName || '',
-        calories: data.nutrition?.calories || 0,
-        protein: data.nutrition?.protein || 0,
-        fat: data.nutrition?.fat || 0,
-        carbs: data.nutrition?.carbs || 0,
-        salt: data.nutrition?.salt || 0,
-
-        // 新規追加フィールド
-        genre: data.genre || '',
-        classification: data.classification || '',
-        price: data.price || 0,
-
-        // 位置情報（GeoPoint型の場合）
-        latitude: data.location?._latitude || data.latitude || null,
-        longitude: data.location?._longitude || data.longitude || null,
-
-        // 内部用
-        id: doc.id,
-
-        // サイズは固定値（後で必要に応じて調整）
-        size: '-',
-      };
-    });
 
     // 除外フィルター（既存ロジックを維持）
     const excludeKeywords = [
@@ -93,12 +102,12 @@ export async function GET(request) {
       'ケチャップ','マスタード','マヨネーズ','醤油','味噌','塩','胡椒','スパイス','香辛料'
     ];
 
-    const filteredMenus = menus.filter(m => {
+    const filteredMenus = allMenus.filter(m => {
       const menuName = (m.menu || '').toLowerCase();
       return !excludeKeywords.some(k => menuName.includes(k.toLowerCase()));
     });
 
-    console.log(`[Firestore] Fetched ${filteredMenus.length} menu items (classification: ${classification || 'all'})`);
+    console.log(`[Firestore] Fetched ${filteredMenus.length} menu items from ${collections.length} collections (classification: ${classification || 'all'})`);
 
     return NextResponse.json(filteredMenus, {
       status: 200,

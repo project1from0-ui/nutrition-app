@@ -1,8 +1,7 @@
 "use client";
-import { getProfile } from "../lib/profile.js";
-import { getIdealRanges as getIdealRangesGoal } from "../lib/scoring.js";
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Google Mapsはクライアントサイドのみで動作するため、dynamic importを使用
 const GoogleMap = dynamic(() => import('./components/GoogleMap'), { ssr: false });
@@ -197,8 +196,16 @@ export default function Page() {
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'goal-select'|'shop-select'|'results'|'menu-detail'
+  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'
   const [isClient, setIsClient] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+
+  // 位置情報
+  const [allowLocation, setAllowLocation] = useState(true);
+  const [userLocation, setUserLocation] = useState(null);
+
+  // ハイライト
+  const [highlightedShop, setHighlightedShop] = useState(null);
 
   // データ
   const [menuData, setMenuData] = useState([]);
@@ -207,6 +214,13 @@ export default function Page() {
   const [selectedMenu, setSelectedMenu] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [currentGoal, setCurrentGoal] = useState('stay');
+  const [geminiEvaluatedMenus, setGeminiEvaluatedMenus] = useState([]);
+
+  // BULK AI
+  const [bulkAIQuery, setBulkAIQuery] = useState('');
+  const [bulkAILoading, setBulkAILoading] = useState(false);
+  const [bulkAIError, setBulkAIError] = useState('');
+  const [accumulatedRequests, setAccumulatedRequests] = useState([]);
 
   // フィルタ
   const [gradeFilter, setGradeFilter] = useState('ALL'); // 'ALL'|'S'|'A'|'B'|'C'|'D'
@@ -252,36 +266,500 @@ export default function Page() {
   const handleLogin = () => { setShowProfileForm(true); setCurrentSection('profile'); };
 
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     if (!birthYear || !birthMonth || !birthDay || !gender || !height || !weight) {
       alert('すべての項目を入力してください。');
       return;
     }
-    // プロフィール入力の次は目的選択へ
-    setShowProfileForm(false);
-    setCurrentSection('goal-select');
+
+    // プロフィールデータを準備
+    const profileData = {
+      birthYear,
+      birthMonth,
+      birthDay,
+      gender,
+      height: parseFloat(height),
+      weight: parseFloat(weight),
+      exerciseFrequency,
+      exerciseTypes: selectedExerciseTypes,
+      selectedAllergies,
+      selectedConditions,
+      healthNotes,
+      agreeTerms
+    };
+
+    // ローカルストレージからuserIdを取得（既存ユーザーの場合）
+    let userId = null;
+    try {
+      const saved = JSON.parse(localStorage.getItem('nutrition_profile') || '{}');
+      userId = saved.userId;
+    } catch {}
+
+    if (userId) {
+      profileData.userId = userId;
+    }
+
+    // Firestoreに保存
+    try {
+      const response = await fetch('/api/profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileData)
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // userIdをローカルストレージに保存
+        const savedProfile = {
+          ...profileData,
+          userId: result.userId
+        };
+        localStorage.setItem('nutrition_profile', JSON.stringify(savedProfile));
+
+        // 保存成功をコンソールに表示
+        console.log('✅ プロフィールがFirestoreに保存されました');
+        console.log('User ID:', result.userId);
+        console.log('保存データ:', profileData);
+
+        // プロフィール入力の次はホーム画面へ
+        setShowProfileForm(false);
+        setCurrentSection('home');
+      } else {
+        console.error('❌ 保存失敗:', result.error);
+        alert('プロフィールの保存に失敗しました: ' + result.error);
+      }
+    } catch (error) {
+      console.error('Save error:', error);
+      alert('プロフィールの保存中にエラーが発生しました。');
+    }
   };
 
   const handleBack = () => {
     if (currentSection === 'terms') setCurrentSection('login');
     else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('login'); }
+    else if (currentSection === 'home') { setShowProfileForm(true); setCurrentSection('profile'); }
     else if (currentSection === 'mode-select') { setCurrentSection('goal-select'); }
     else if (currentSection === 'shop-select') { setCurrentSection('goal-select'); }
-    else if (currentSection === 'goal-select') { setShowProfileForm(true); setCurrentSection('profile'); }
+    else if (currentSection === 'goal-select') { setCurrentSection('home'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
     else if (currentSection === 'menu-detail') { setCurrentSection('shop-select'); setSelectedMenu(null); }
   };
 
   const handleMenuClick = (menu) => { setSelectedMenu(menu); setCurrentSection('menu-detail'); };
 
+  // 目的選択時の共通処理
+  const handleGoalSelection = async (goalType, classificationName) => {
+    setGoal(goalType);
+    const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: goalType };
+    setUserProfile(profile);
+
+    // ローディング画面へ移行
+    setCurrentSection('loading');
+    setLoadingProgress(0);
+
+    // プログレスバーアニメーション
+    const progressInterval = setInterval(() => {
+      setLoadingProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + 10;
+      });
+    }, 200);
+
+    // メニュー取得
+    const data = await fetchMenuData(classificationName);
+    setMenuData(data);
+    setGeminiEvaluatedMenus([]); // リセット
+    requestLocationIfAllowed();
+
+    // 100%完了
+    setLoadingProgress(100);
+    clearInterval(progressInterval);
+
+    // 少し待ってから画面遷移
+    setTimeout(() => {
+      setCurrentSection('shop-select');
+    }, 500);
+  };
+
+  // BULK AI - 要望を追加して適用
+  const handleAddRequest = async () => {
+    if (!bulkAIQuery.trim()) {
+      setBulkAIError('要望を入力してください');
+      return;
+    }
+
+    const newRequest = bulkAIQuery.trim();
+    const updatedRequests = [...accumulatedRequests, newRequest];
+    setAccumulatedRequests(updatedRequests);
+    setBulkAIQuery('');
+    setBulkAILoading(true);
+    setBulkAIError('');
+
+    try {
+      const classification = userProfile?.goal === 'diet' ? '減量' :
+                            userProfile?.goal === 'stay' ? '現状維持' :
+                            userProfile?.goal === 'bulk' ? 'バルクアップ' :
+                            userProfile?.goal === 'cheat' ? 'チート' :
+                            currentGoal === 'diet' ? '減量' :
+                            currentGoal === 'stay' ? '現状維持' :
+                            currentGoal === 'bulk' ? 'バルクアップ' : 'チート';
+
+      const combinedRequest = updatedRequests.map((req, idx) => `${idx + 1}. ${req}`).join('\n');
+      const newTop10 = await evaluateMenusWithBulkAI(combinedRequest, menuData, classification);
+      setGeminiEvaluatedMenus(newTop10);
+    } catch (error) {
+      setBulkAIError(error.message || 'その要望には応えられません');
+      console.error('[BULK AI] エラー:', error);
+    } finally {
+      setBulkAILoading(false);
+    }
+  };
+
+  // BULK AI - 特定の要望を削除して再適用
+  const handleRemoveRequest = async (index) => {
+    const updatedRequests = accumulatedRequests.filter((_, i) => i !== index);
+    setAccumulatedRequests(updatedRequests);
+
+    // 要望が0件になった場合は元のランキングに戻す
+    if (updatedRequests.length === 0) {
+      setGeminiEvaluatedMenus([]);
+      return;
+    }
+
+    // 残りの要望で再適用
+    setBulkAILoading(true);
+    setBulkAIError('');
+
+    try {
+      const classification = userProfile?.goal === 'diet' ? '減量' :
+                            userProfile?.goal === 'stay' ? '現状維持' :
+                            userProfile?.goal === 'bulk' ? 'バルクアップ' :
+                            userProfile?.goal === 'cheat' ? 'チート' :
+                            currentGoal === 'diet' ? '減量' :
+                            currentGoal === 'stay' ? '現状維持' :
+                            currentGoal === 'bulk' ? 'バルクアップ' : 'チート';
+
+      const combinedRequest = updatedRequests.map((req, idx) => `${idx + 1}. ${req}`).join('\n');
+      const newTop10 = await evaluateMenusWithBulkAI(combinedRequest, menuData, classification);
+      setGeminiEvaluatedMenus(newTop10);
+    } catch (error) {
+      setBulkAIError(error.message || 'その要望には応えられません');
+      console.error('[BULK AI] エラー:', error);
+    } finally {
+      setBulkAILoading(false);
+    }
+  };
+
+  // BULK AI - すべての要望を適用
+  const handleApplyAllRequests = async () => {
+    if (accumulatedRequests.length === 0) {
+      setBulkAIError('要望を追加してください');
+      return;
+    }
+
+    setBulkAILoading(true);
+    setBulkAIError('');
+
+    try {
+      const classification = userProfile?.goal === 'diet' ? '減量' :
+                            userProfile?.goal === 'stay' ? '現状維持' :
+                            userProfile?.goal === 'bulk' ? 'バルクアップ' :
+                            userProfile?.goal === 'cheat' ? 'チート' :
+                            currentGoal === 'diet' ? '減量' :
+                            currentGoal === 'stay' ? '現状維持' :
+                            currentGoal === 'bulk' ? 'バルクアップ' : 'チート';
+
+      const combinedRequest = accumulatedRequests.map((req, idx) => `${idx + 1}. ${req}`).join('\n');
+      const newTop10 = await evaluateMenusWithBulkAI(combinedRequest, menuData, classification);
+      setGeminiEvaluatedMenus(newTop10);
+    } catch (error) {
+      setBulkAIError(error.message || 'その要望には応えられません');
+      console.error('[BULK AI] エラー:', error);
+    } finally {
+      setBulkAILoading(false);
+    }
+  };
+
+  // リセットハンドラー
+  const handleResetRanking = () => {
+    setGeminiEvaluatedMenus([]);
+    setBulkAIQuery('');
+    setBulkAIError('');
+    setAccumulatedRequests([]);
+  };
+
   /* ============ 判定・整形（核心） ============ */
+  // 各分類に最適なメニューをスコアリングして上位10件を取得
+  const calculateMenuScore = (menu, classification) => {
+    const cal = menu.calories || 0;
+    const protein = menu.protein || 0;
+    const fat = menu.fat || 0;
+    const carbs = menu.carbs || 0;
+
+    switch (classification) {
+      case '減量':
+        // カロリーが低く、タンパク質が高く、脂質が低いものを優先
+        // スコア = タンパク質効率 - 脂質ペナルティ
+        if (cal === 0) return 0;
+        return (protein / cal) * 1000 - (fat / 10);
+
+      case '現状維持':
+        // バランスが良いものを優先（理想的なPFCバランスに近いもの）
+        // 理想比率: P:F:C = 15%:25%:60% (カロリーベース)
+        if (cal === 0) return 0;
+        const pCal = protein * 4;
+        const fCal = fat * 9;
+        const cCal = carbs * 4;
+        const totalMacro = pCal + fCal + cCal;
+        if (totalMacro === 0) return 0;
+
+        const pRatio = pCal / totalMacro;
+        const fRatio = fCal / totalMacro;
+        const cRatio = cCal / totalMacro;
+
+        // 理想との差分を計算（差が小さいほど高得点）
+        const pDiff = Math.abs(pRatio - 0.15);
+        const fDiff = Math.abs(fRatio - 0.25);
+        const cDiff = Math.abs(cRatio - 0.60);
+        const balanceScore = 100 - (pDiff + fDiff + cDiff) * 100;
+
+        // カロリーが適正範囲（500-750）に近いほど高得点
+        const calScore = cal >= 500 && cal <= 750 ? 50 : 50 - Math.abs(cal - 625) / 10;
+
+        return balanceScore + calScore;
+
+      case 'バルクアップ':
+        // タンパク質が高く、カロリーも十分にあるものを優先
+        // 脂質は抑えめが理想
+        return protein * 2 + (cal / 10) - (fat / 5);
+
+      case 'チート':
+        // カロリーが高いものを優先
+        return cal;
+
+      default:
+        return 0;
+    }
+  };
+
+  // Gemini APIでメニューを評価する関数
+  const evaluateMenusWithGemini = async (menus, classification) => {
+    try {
+      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash-exp",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                rank: { type: "integer" },
+                menuId: { type: "string" },
+                score: { type: "number" },
+                reason: { type: "string" }
+              },
+              required: ["rank", "menuId", "score", "reason"]
+            }
+          }
+        }
+      });
+
+      const menuData = menus.map((m, i) => ({
+        id: `menu_${i}`,
+        shop: m.shop,
+        name: m.menu,
+        calories: m.calories,
+        protein: m.protein,
+        fat: m.fat,
+        carbs: m.carbs
+      }));
+
+      const goalDescription = {
+        '減量': '低カロリーで高タンパク質、脂質を抑えたメニュー。300-550kcal、タンパク質20g以上、脂質15g以下が理想。',
+        '現状維持': 'バランスの良いPFC比率（15%:25%:60%）のメニュー。500-750kcalが理想。',
+        'バルクアップ': '高タンパク質で適度なカロリーのあるメニュー。650-950kcal、タンパク質35g以上が理想。脂質は抑えめ。',
+        'チート': '高カロリーのメニュー。800kcal以上が理想。'
+      };
+
+      const prompt = `あなたは栄養の専門家です。以下の10個のメニューを「${classification}」という目的に対して評価し、最適な順に並べ替えてください。
+
+目的の詳細: ${goalDescription[classification]}
+
+メニューリスト:
+${JSON.stringify(menuData, null, 2)}
+
+各メニューに0-100の点数をつけ、点数の高い順に並べてください。評価理由は簡潔に50文字以内で説明してください。`;
+
+      console.log('[Gemini] リクエスト送信中...');
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      const evaluatedMenus = JSON.parse(text);
+
+      console.log('[Gemini] 評価結果:', evaluatedMenus);
+
+      // 元のメニューデータとマージ
+      const rerankedMenus = evaluatedMenus.map(evaluated => {
+        const originalIndex = parseInt(evaluated.menuId.replace('menu_', ''));
+        return {
+          ...menus[originalIndex],
+          geminiScore: evaluated.score,
+          geminiRank: evaluated.rank,
+          geminiReason: evaluated.reason
+        };
+      });
+
+      return rerankedMenus;
+    } catch (error) {
+      console.error('[Gemini] エラー:', error);
+      // エラー時は元のスコアリングにフォールバック
+      return menus;
+    }
+  };
+
+  // BULK AI用のGemini API呼び出し
+  const evaluateMenusWithBulkAI = async (userRequest, menus, classification) => {
+    try {
+      const genAI = new GoogleGenerativeAI(process.env.NEXT_PUBLIC_GEMINI_API_KEY);
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash-exp",
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "object",
+            properties: {
+              success: { type: "boolean" },
+              message: { type: "string" },
+              menus: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    rank: { type: "integer" },
+                    menuId: { type: "string" },
+                    score: { type: "number" },
+                    reason: { type: "string" }
+                  },
+                  required: ["rank", "menuId", "score", "reason"]
+                }
+              }
+            },
+            required: ["success", "message"]
+          }
+        }
+      });
+
+      const menuData = menus.map((m, i) => ({
+        id: `menu_${i}`,
+        shop: m.shop,
+        name: m.menu,
+        category: m.category,
+        calories: m.calories,
+        protein: m.protein,
+        fat: m.fat,
+        carbs: m.carbs,
+        price: m.price
+      }));
+
+      const goalDescription = {
+        '減量': '低カロリーで高タンパク質、脂質を抑えたメニュー。300-550kcal、タンパク質20g以上、脂質15g以下が理想。',
+        '現状維持': 'バランスの良いPFC比率（15%:25%:60%）のメニュー。500-750kcalが理想。',
+        'バルクアップ': '高タンパク質で適度なカロリーのあるメニュー。650-950kcal、タンパク質35g以上が理想。脂質は抑えめ。',
+        'チート': '高カロリーのメニュー。800kcal以上が理想。'
+      };
+
+      const prompt = `あなたは栄養の専門家です。ユーザーの以下の要望（複数ある場合はすべて）に応えて、適切なメニューを10個選んでランキング形式で提示してください。
+
+【重要な制約】
+- 現在の食事目的は「${classification}」です。この目的に合うメニューの中から選んでください。
+- 目的の詳細: ${goalDescription[classification]}
+
+【ユーザーの要望】
+${userRequest}
+
+【利用可能なメニュー一覧】
+${JSON.stringify(menuData, null, 2)}
+
+【指示】
+1. **最優先事項**: ユーザーの要望を厳密に守ってください。例えば、「魚」と言われたら、必ず魚料理のみを選んでください。鶏肉や他の食材は絶対に選ばないでください。
+2. ユーザーの要望（複数ある場合はすべての要望）を満たし、かつ「${classification}」という食事目的にも適したメニューを10個選んでください
+3. 複数の要望がある場合は、すべての要望をバランスよく考慮してください
+4. メニュー名、店舗名、カテゴリー名をよく見て、ユーザーの要望に合致するものだけを選んでください
+5. 各メニューに1-100の点数をつけ、点数の高い順に並べてください
+6. 評価理由は簡潔に50文字以内で説明してください（複数の要望に応えている場合はその旨も記載）
+7. もしユーザーの要望に応えられるメニューが見つからない場合、または要望に合うメニューが10個未満の場合は、success: false, message: "その要望には応えられません" を返してください
+8. 要望に応えられる場合は、success: true, message: "要望に応じたメニューを選定しました", menus: [...] を返してください`;
+
+      console.log('[BULK AI] リクエスト送信中...');
+      const result = await model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
+      const aiResponse = JSON.parse(text);
+
+      console.log('[BULK AI] 評価結果:', aiResponse);
+
+      if (!aiResponse.success) {
+        throw new Error(aiResponse.message || 'その要望には応えられません');
+      }
+
+      // 元のメニューデータとマージ
+      const rerankedMenus = aiResponse.menus.map(evaluated => {
+        const originalIndex = parseInt(evaluated.menuId.replace('menu_', ''));
+        return {
+          ...menus[originalIndex],
+          geminiScore: evaluated.score,
+          geminiRank: evaluated.rank,
+          geminiReason: evaluated.reason
+        };
+      });
+
+      return rerankedMenus;
+    } catch (error) {
+      console.error('[BULK AI] エラー:', error);
+      throw error;
+    }
+  };
+
   const buildResults = (list, profile) => {
-    const isBulk = (profile.goal === 'bulk') || (currentGoal === 'bulk');
-    const R = isBulk ? RANGES_BULK : RANGES_DIET;
-    const CENTER = isBulk ? BULK_CENTER : DIET_CENTER;
-    // 评分・スコアを廃止。単純な並び（カロリー昇順）に変更
-    const simple = [...list].sort((a,b) => (a.calories ?? 0) - (b.calories ?? 0));
-    return simple;
+    const classification = profile?.goal === 'diet' ? '減量' :
+                          profile?.goal === 'stay' ? '現状維持' :
+                          profile?.goal === 'bulk' ? 'バルクアップ' :
+                          profile?.goal === 'cheat' ? 'チート' :
+                          currentGoal === 'diet' ? '減量' :
+                          currentGoal === 'stay' ? '現状維持' :
+                          currentGoal === 'bulk' ? 'バルクアップ' :
+                          currentGoal === 'cheat' ? 'チート' : '現状維持';
+
+    // 各メニューにスコアを付与
+    const scored = list.map(menu => ({
+      ...menu,
+      score: calculateMenuScore(menu, classification)
+    }));
+
+    // スコアの高い順にソートして上位10件を取得
+    const top10 = scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
+    console.log(`[buildResults] 分類: ${classification}, 対象メニュー数: ${list.length}, Top10選出完了`);
+    if (top10.length > 0) {
+      console.log('[buildResults] Top3メニュー:', top10.slice(0, 3).map(m => ({
+        shop: m.shop,
+        menu: m.menu,
+        score: m.score.toFixed(2),
+        cal: m.calories,
+        protein: m.protein,
+        fat: m.fat
+      })));
+    }
+
+    return top10;
   };
 
   const styles = {
@@ -345,6 +823,30 @@ export default function Page() {
 
   if (!isClient) return null;
 
+  // 位置情報取得関数（目的選択時に呼ばれる）
+  const requestLocationIfAllowed = () => {
+    if (!allowLocation) {
+      console.log('位置情報の共有が許可されていません');
+      return;
+    }
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          };
+          setUserLocation(location);
+          console.log('位置情報取得成功:', location);
+        },
+        (error) => {
+          console.error('位置情報取得エラー:', error);
+        }
+      );
+    }
+  };
+
   return (
     <div className="container" style={styles.container}>
       {(() => {
@@ -370,9 +872,113 @@ export default function Page() {
       {/* ログイン */}
       {currentSection === 'login' && (
         <div style={styles.card}>
-          <h1 style={{ ...styles.title, fontSize: 64 }}>BULK</h1>
+          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 20px', display: 'block' }} />
           <p style={{ textAlign:'center', color:'#666', marginBottom: 30 }}>最適な食事をAIで見つけよう</p>
           <button style={styles.button} onClick={handleLogin}>Start</button>
+        </div>
+      )}
+
+      {/* ホーム画面 */}
+      {currentSection === 'home' && (
+        <div style={styles.card}>
+          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 20px', display: 'block' }} />
+          <h1 style={{ ...styles.title, marginBottom: 12 }}>ようこそ、BULKへ</h1>
+          <p style={{ textAlign:'center', color:'#666', marginBottom: 40, fontSize: 16 }}>
+            AIがあなたに最適な食事を提案します
+          </p>
+
+          {/* メインアクションカード */}
+          <div style={{
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: 16,
+            padding: 32,
+            marginBottom: 24,
+            boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)',
+            color: 'white',
+            textAlign: 'center'
+          }}>
+            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>近隣メニュー解析</h2>
+            <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.9 }}>
+              半径200m圏内のレストランから<br />あなたの目的に合ったメニューを見つけます
+            </p>
+            <button
+              onClick={() => setCurrentSection('goal-select')}
+              style={{
+                width: '100%',
+                padding: '16px 32px',
+                background: 'white',
+                color: '#667eea',
+                border: 'none',
+                borderRadius: 12,
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.2)';
+              }}
+              onMouseLeave={e => {
+                e.target.style.transform = 'translateY(0)';
+                e.target.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
+              }}
+            >
+              メニューを探す →
+            </button>
+          </div>
+
+          {/* 機能紹介カード */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+            <div style={{
+              background: '#f8f9fa',
+              borderRadius: 12,
+              padding: 20,
+              textAlign: 'center',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🎯</div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>目的別提案</h3>
+              <p style={{ fontSize: 12, color: '#6b7280' }}>減量・維持・増量</p>
+            </div>
+            <div style={{
+              background: '#f8f9fa',
+              borderRadius: 12,
+              padding: 20,
+              textAlign: 'center',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>AI解析</h3>
+              <p style={{ fontSize: 12, color: '#6b7280' }}>栄養バランス最適化</p>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{
+              background: '#f8f9fa',
+              borderRadius: 12,
+              padding: 20,
+              textAlign: 'center',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>位置情報連動</h3>
+              <p style={{ fontSize: 12, color: '#6b7280' }}>近隣店舗を検索</p>
+            </div>
+            <div style={{
+              background: '#f8f9fa',
+              borderRadius: 12,
+              padding: 20,
+              textAlign: 'center',
+              border: '1px solid #e5e7eb'
+            }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
+              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>詳細な栄養情報</h3>
+              <p style={{ fontSize: 12, color: '#6b7280' }}>PFC バランス表示</p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -383,61 +989,25 @@ export default function Page() {
           <h1 style={styles.title}>食事の目的</h1>
           <p style={{ textAlign:'center', color:'#666', marginBottom:20 }}>この目的は一覧の並びや判定に使われます</p>
           <div style={{ display:'grid', gridTemplateColumns:'1fr', gap:12, maxWidth:480, margin:'0 auto 16px' }}>
-            <button type="button" onClick={async () => {
-              const g = 'diet';
-              setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
-              setUserProfile(profile);
-              // 減量メニューのみ取得
-              const data = await fetchMenuData('減量');
-              setMenuData(data);
-              setCurrentSection('shop-select');
-            }}
+            <button type="button" onClick={() => handleGoalSelection('diet', '減量')}
               style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='diet'?'2px solid #22c55e':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='diet'?'#f0fdf4':'white', color: goal==='diet'?'#166534':'#666', fontWeight: 700 }}>
               減量
             </button>
-            <button type="button" onClick={async () => {
-              const g = 'stay';
-              setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
-              setUserProfile(profile);
-              // 現状維持メニューのみ取得
-              const data = await fetchMenuData('現状維持');
-              setMenuData(data);
-              setCurrentSection('shop-select');
-            }}
+            <button type="button" onClick={() => handleGoalSelection('stay', '現状維持')}
               style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='stay'?'2px solid #60a5fa':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='stay'?'#eff6ff':'white', color: goal==='stay'?'#1e3a8a':'#666', fontWeight: 700 }}>
               現状維持
             </button>
-            <button type="button" onClick={async () => {
-              const g = 'bulk';
-              setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
-              setUserProfile(profile);
-              // バルクアップメニューのみ取得
-              const data = await fetchMenuData('バルクアップ');
-              setMenuData(data);
-              setCurrentSection('shop-select');
-            }}
+            <button type="button" onClick={() => handleGoalSelection('bulk', 'バルクアップ')}
               style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='bulk'?'2px solid #f97316':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='bulk'?'#fff7ed':'white', color: goal==='bulk'?'#9a3412':'#666', fontWeight: 700 }}>
               バルクアップ
             </button>
-            <button type="button" onClick={async () => {
-              const g = 'cheat';
-              setGoal(g);
-              const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: g };
-              setUserProfile(profile);
-              // チートメニューのみ取得
-              const data = await fetchMenuData('チート');
-              setMenuData(data);
-              setCurrentSection('shop-select');
-            }}
+            <button type="button" onClick={() => handleGoalSelection('cheat', 'チート')}
               style={{ height:80, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16,
                        border: goal==='cheat'?'2px solid #f59e0b':'2px solid #e0e0e0', borderRadius:12,
                        background: goal==='cheat'?'#fffbeb':'white', color: goal==='cheat'?'#92400e':'#666', fontWeight: 700 }}>
@@ -448,6 +1018,61 @@ export default function Page() {
         </div>
       )}
 
+
+      {/* ローディング画面 */}
+      {currentSection === 'loading' && (
+        <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
+          <h1 style={{ ...styles.title, marginBottom: 20 }}>半径200m圏内で</h1>
+          <h1 style={{ ...styles.title, marginTop: 0, marginBottom: 40 }}>あなたに最適なメニューを解析中</h1>
+
+          {/* 地図表示（全ピン） */}
+          {isClient && menuData.length > 0 && (
+            <div style={{ marginBottom: 30 }}>
+              <GoogleMap
+                menuData={menuData}
+                onShopClick={() => {}}
+              />
+            </div>
+          )}
+
+          {/* プログレスバー */}
+          <div style={{
+            width: '100%',
+            maxWidth: 400,
+            height: 8,
+            background: '#e5e7eb',
+            borderRadius: 999,
+            overflow: 'hidden',
+            margin: '0 auto 20px'
+          }}>
+            <div style={{
+              width: `${loadingProgress}%`,
+              height: '100%',
+              background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
+              transition: 'width 0.3s ease',
+              borderRadius: 999
+            }} />
+          </div>
+
+          {/* パーセンテージ表示 */}
+          <p style={{
+            textAlign: 'center',
+            fontSize: 18,
+            fontWeight: 700,
+            color: '#667eea',
+            marginBottom: 20
+          }}>
+            {loadingProgress}%
+          </p>
+
+          <style jsx>{`
+            @keyframes pulse {
+              0%, 100% { transform: scale(1); opacity: 1; }
+              50% { transform: scale(1.2); opacity: 0.7; }
+            }
+          `}</style>
+        </div>
+      )}
 
       {/* 規約はプロフィールページ下部へ統合 */}
 
@@ -612,14 +1237,20 @@ export default function Page() {
             <label htmlFor="agreeTermsProfile">AIによるデータ利用に同意します <span style={{ color:'red' }}>*</span></label>
           </div>
 
+          {/* 位置情報の共有チェックボックス */}
+          <div style={{ marginBottom:20, display:'flex', justifyContent:'center', alignItems:'center' }}>
+            <input type="checkbox" id="allowLocationProfile" checked={allowLocation} onChange={e=>setAllowLocation(e.target.checked)} style={{ marginRight:10 }} required/>
+            <label htmlFor="allowLocationProfile">位置情報の共有に同意します <span style={{ color:'red' }}>*</span></label>
+          </div>
+
           {/* 目的は別ステップへ移動 */}
 
           <button onClick={handleSearch}
             style={{ ...styles.button,
-              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms) ? 0.5 : 1,
-              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms) ? 'not-allowed' : 'pointer'
+              opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms||!allowLocation) ? 0.5 : 1,
+              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms||!allowLocation) ? 'not-allowed' : 'pointer'
             }}
-            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms}
+            disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||!agreeTerms||!allowLocation}
           >
             決定
           </button>
@@ -632,7 +1263,7 @@ export default function Page() {
       {currentSection === 'shop-select' && (
         <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>あなたに最適なメニューを解析</h1>
+          <h1 style={styles.title}>近隣メニュー解析結果</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -655,46 +1286,205 @@ export default function Page() {
                 
                 {/* 店名で検索は削除 */}
 
-                {/* 地図表示 */}
-                {isClient && (
-                  <div style={{ marginBottom: 24 }}>
-                    <GoogleMap
-                      menuData={menuData}
-                      onShopClick={(shop) => {
-                        setSelectedShop(shop);
-                        const filtered = menuData.filter(item =>
-                          normalizeShop(item.shop).includes(normalizeShop(shop))
-                        );
-                        if (filtered.length === 0) return alert('この店舗のデータが見つかりません');
-                        const results = buildResults(filtered, userProfile);
-                        setScoredMenus(results);
-                        setGradeFilter('ALL');
-                        setShopCategoryFilter('ALL');
-                        setCurrentSection('menu-detail');
-                      }}
-                    />
-                  </div>
-                )}
-
                 {/* メニュー一覧（シンプルなラベルのみ） */}
                 <div style={{ marginTop: 20 }}>
-                  <h2 style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16, textAlign: 'center' }}>メニュー一覧</h2>
-                  <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto' }}>
-                    {menuData.map((m, i) => (
-                      <button
-                        key={`${m.shop}-${m.menu}-${i}`}
-                        onClick={() => { setSelectedMenu(m); setCurrentSection('menu-detail'); }}
-                        style={{
-                          padding:8, border:'1px solid #e5e7eb', borderRadius:8, background:'#fff',
-                          color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer'
-                        }}
-                        onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.background='#f0f4ff'; }}
-                        onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.background='#fff'; }}
-                      >
-                        {`${m.shop || ''}  -  ${m.menu || ''}`}
-                      </button>
-                    ))}
-                  </div>
+                  {(() => {
+                    // Top10を計算
+                    const top10 = buildResults(menuData, userProfile);
+
+                      // Gemini評価を実行（stateが空の場合のみ）
+                      if (top10.length > 0 && geminiEvaluatedMenus.length === 0) {
+                        const classification = userProfile?.goal === 'diet' ? '減量' :
+                                              userProfile?.goal === 'stay' ? '現状維持' :
+                                              userProfile?.goal === 'bulk' ? 'バルクアップ' :
+                                              userProfile?.goal === 'cheat' ? 'チート' :
+                                              currentGoal === 'diet' ? '減量' :
+                                              currentGoal === 'stay' ? '現状維持' :
+                                              currentGoal === 'bulk' ? 'バルクアップ' : 'チート';
+
+                        evaluateMenusWithGemini(top10, classification).then(evaluated => {
+                          setGeminiEvaluatedMenus(evaluated);
+                        });
+                      }
+
+                      // Gemini評価済みデータがあればそれを使用、なければtop10を使用
+                      const displayMenus = geminiEvaluatedMenus.length > 0 ? geminiEvaluatedMenus : top10;
+
+                      return (
+                        <>
+                          {/* 地図表示（Top10の店舗のみ） */}
+                          {isClient && (
+                            <div style={{ marginBottom: 16 }}>
+                              <GoogleMap
+                                menuData={displayMenus}
+                                highlightedShop={highlightedShop}
+                                onShopHover={(shop) => setHighlightedShop(shop)}
+                                onShopClick={(shop) => {
+                                  setSelectedShop(shop);
+                                  const filtered = menuData.filter(item =>
+                                    normalizeShop(item.shop).includes(normalizeShop(shop))
+                                  );
+                                  if (filtered.length === 0) return alert('この店舗のデータが見つかりません');
+                                  const results = buildResults(filtered, userProfile);
+                                  setScoredMenus(results);
+                                  setGradeFilter('ALL');
+                                  setShopCategoryFilter('ALL');
+                                  setCurrentSection('menu-detail');
+                                }}
+                              />
+                            </div>
+                          )}
+
+                          {/* タイトル */}
+                          <h2 style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16, textAlign: 'center' }}>おすすめTop10メニュー</h2>
+
+                          {/* メニューリスト */}
+                          <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto', marginBottom: 20 }}>
+                            {displayMenus.map((m, i) => {
+                              const isHighlighted = highlightedShop === m.shop;
+                              return (
+                                <button
+                                  key={`${m.shop}-${m.menu}-${i}`}
+                                  onClick={() => { setSelectedMenu(m); setCurrentSection('menu-detail'); }}
+                                  style={{
+                                    padding:8,
+                                    border: isHighlighted ? '2px solid #667eea' : '1px solid #e5e7eb',
+                                    borderRadius:8,
+                                    background: isHighlighted ? '#f0f4ff' : '#fff',
+                                    color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={e=>{
+                                    e.currentTarget.style.borderColor='#667eea';
+                                    e.currentTarget.style.borderWidth='2px';
+                                    e.currentTarget.style.background='#f0f4ff';
+                                    setHighlightedShop(m.shop);
+                                  }}
+                                  onMouseLeave={e=>{
+                                    if (highlightedShop !== m.shop) {
+                                      e.currentTarget.style.borderColor='#e5e7eb';
+                                      e.currentTarget.style.borderWidth='1px';
+                                      e.currentTarget.style.background='#fff';
+                                    }
+                                    setHighlightedShop(null);
+                                  }}
+                                >
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                      <span style={{ fontSize: 16, fontWeight: 800, color: '#667eea' }}>{i + 1}位</span>
+                                      <span style={{ fontSize: 11, color: '#999', fontWeight: 500 }}>{m.shop || ''}</span>
+                                      {m.source === 'menuItemsHirokojiClass' && (
+                                        <span style={{ fontSize: 10, color: '#667eea', fontWeight: 600, padding: '2px 6px', background: '#eff6ff', borderRadius: 4 }}>公式</span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: 14, color: '#111827', fontWeight: 600, paddingLeft: 4 }}>
+                                      {m.menu || ''}
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* BULK AI入力欄 */}
+                          <div style={{
+                            padding: 16,
+                            background: '#f8f9fa',
+                            borderRadius: 12,
+                            border: '1px solid #e5e7eb'
+                          }}>
+                            <h3 style={{
+                              fontSize: 14,
+                              fontWeight: 700,
+                              color: '#667eea',
+                              marginBottom: 12
+                            }}>
+                              BULK AI
+                            </h3>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <input
+                                type="text"
+                                value={bulkAIQuery}
+                                onChange={(e) => setBulkAIQuery(e.target.value)}
+                                onKeyPress={(e) => {
+                                  if (e.key === 'Enter' && !bulkAILoading) {
+                                    handleAddRequest();
+                                  }
+                                }}
+                                placeholder="例: あっさりしたものがいい、魚料理が食べたい"
+                                disabled={bulkAILoading}
+                                style={{
+                                  flex: 1,
+                                  padding: '10px 12px',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: 8,
+                                  fontSize: 14,
+                                  outline: 'none',
+                                  transition: 'border-color 0.2s',
+                                }}
+                                onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                                onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                              />
+                              <button
+                                onClick={handleAddRequest}
+                                disabled={bulkAILoading}
+                                style={{
+                                  padding: '10px 20px',
+                                  background: bulkAILoading ? '#9ca3af' : '#667eea',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: 8,
+                                  fontSize: 14,
+                                  fontWeight: 700,
+                                  cursor: bulkAILoading ? 'not-allowed' : 'pointer',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                要望
+                              </button>
+                            </div>
+
+                            {/* 要望履歴 */}
+                            {accumulatedRequests.length > 0 && (
+                              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                {accumulatedRequests.map((request, index) => (
+                                  <div
+                                    key={index}
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      fontSize: 12,
+                                      color: '#666',
+                                      gap: 4
+                                    }}
+                                  >
+                                    <button
+                                      onClick={() => handleRemoveRequest(index)}
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        color: '#999',
+                                        cursor: 'pointer',
+                                        fontSize: 14,
+                                        padding: 0,
+                                        lineHeight: 1
+                                      }}
+                                      title="削除"
+                                    >
+                                      ×
+                                    </button>
+                                    <span>{request}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      );
+                    })()}
                 </div>
               </div>
             );
@@ -770,14 +1560,61 @@ export default function Page() {
           <button onClick={handleBack} style={styles.backButton}>←</button>
           <div className="detail-header">
             <h1 style={styles.title}>{selectedMenu.menu}</h1>
-            <p style={{ textAlign:'center', color:'#666', marginBottom:30, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
+            <p style={{ textAlign:'center', color:'#666', marginBottom:20, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
+          </div>
+
+          {/* メニュー画像 */}
+          <div style={{
+            width: '100%',
+            maxWidth: 500,
+            height: 280,
+            margin: '0 auto 30px',
+            borderRadius: 16,
+            overflow: 'hidden',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            background: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            position: 'relative'
+          }}>
+            <img
+              src={`https://source.unsplash.com/500x280/?${encodeURIComponent(selectedMenu.menu + ' food japanese')}`}
+              alt={selectedMenu.menu}
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                e.target.nextSibling.style.display = 'flex';
+              }}
+            />
+            <div style={{
+              display: 'none',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 12,
+              color: '#9ca3af',
+              fontSize: 48
+            }}>
+              <span>🍽️</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{selectedMenu.menu}</span>
+            </div>
           </div>
 
           {/* 評価ゲージ削除 */}
-              
+
           {/* 栄養表示 */}
-          <div className="detail-grid" style={{ background:'#f8f9fa', borderRadius:15, padding:24, marginBottom:24 }}>
-            <h2 style={{ fontSize:20, fontWeight:'bold', color:'#333', marginBottom:20, textAlign:'center' }}>栄養成分</h2>
+          <div style={{ marginBottom:24 }}>
+            <h2 style={{ fontSize:22, fontWeight:800, color:'#111827', marginBottom:16, display:'flex', alignItems:'center', gap:8 }}>
+              {selectedMenu.source === 'menuItemsHirokojiClass' && (
+                <span style={{ fontSize:11, color:'#667eea', fontWeight:600, padding:'4px 8px', background:'#eff6ff', borderRadius:6 }}>公式</span>
+              )}
+              栄養成分
+            </h2>
             {(() => {
               const activeRangesDetail = getActiveRangesForJudge((userProfile?.goal || currentGoal), gradeFilter);
               const kcalPassD = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
@@ -785,57 +1622,114 @@ export default function Page() {
               const fPassD    = isMetricPass(selectedMenu.fat,      activeRangesDetail, 'fat');
               const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
               const idealRanges = ((userProfile?.goal || currentGoal) === 'bulk') ? RANGES_BULK.S : RANGES_DIET.S;
+
+              const nutrients = [
+                { label:'エネルギー', value:selectedMenu.calories, unit:'kcal', denom:1000, pass:kcalPassD, idealLow:idealRanges.calories[0], idealHigh:idealRanges.calories[1] },
+                { label:'たんぱく質', value:selectedMenu.protein, unit:'g', denom:50, pass:pPassD, idealLow:idealRanges.protein[0], idealHigh:idealRanges.protein[1] },
+                { label:'脂質', value:selectedMenu.fat, unit:'g', denom:30, pass:fPassD, idealLow:idealRanges.fat[0], idealHigh:idealRanges.fat[1] },
+                { label:'炭水化物', value:selectedMenu.carbs, unit:'g', denom:120, pass:cPassD, idealLow:idealRanges.carbs[0], idealHigh:idealRanges.carbs[1] }
+              ];
+
               return (
-                <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-                  {/* エネルギー */}
-                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                    <div style={{ display:'flex', alignItems:'center' }}>
-                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333' }}>エネルギー</span>
+                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                  {nutrients.map((n, idx) => (
+                    <div key={idx} style={{ display:'flex', alignItems:'center', gap:16 }}>
+                      <div style={{ width:100, fontSize:14, fontWeight:600, color:'#374151', textAlign:'right' }}>
+                        {n.label}
+                      </div>
+                      <div style={{ flex:1, position:'relative' }}>
+                        <div style={{
+                          height:40,
+                          background:'#f3f4f6',
+                          borderRadius:8,
+                          overflow:'hidden',
+                          position:'relative',
+                          border:`2px solid ${n.pass ? '#e5e7eb' : '#fca5a5'}`
+                        }}>
+                          <div style={{
+                            width:`${Math.min((n.value / n.denom) * 100, 100)}%`,
+                            height:'100%',
+                            background:n.pass ? 'linear-gradient(90deg, #667eea, #764ba2)' : 'linear-gradient(90deg, #f093fb, #f5576c)',
+                            transition:'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                            position:'relative'
+                          }}>
+                            <div style={{
+                              position:'absolute',
+                              right:12,
+                              top:'50%',
+                              transform:'translateY(-50%)',
+                              fontSize:15,
+                              fontWeight:700,
+                              color:'white',
+                              textShadow:'0 1px 2px rgba(0,0,0,0.2)'
+                            }}>
+                              {Number.isFinite(n.value) ? `${n.value} ${n.unit}` : '-'}
+                            </div>
+                          </div>
+                        </div>
+                        {!n.pass && (
+                          <div style={{ position:'absolute', top:42, left:0, fontSize:11, color:'#dc2626', fontWeight:600 }}>
+                            {n.value > n.idealHigh ? `+${(n.value - n.idealHigh).toFixed(0)}${n.unit} 超過` :
+                             n.value < n.idealLow ? `-${(n.idealLow - n.value).toFixed(0)}${n.unit} 不足` : ''}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="chart">
-                      <Bar value={selectedMenu.calories} unit="kcal" denom={1000} pass={kcalPassD}
-                        idealLow={idealRanges.calories[0]} idealHigh={idealRanges.calories[1]} showLegend={true} />
-                    </div>
-                  </div>
-
-                  {/* たんぱく質 */}
-                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                    <div style={{ display:'flex', alignItems:'center' }}>
-                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>たんぱく質</span>
-                </div>
-                    <div className="chart">
-                      <Bar name="たんぱく質" value={selectedMenu.protein} unit="g" denom={50} pass={pPassD}
-                        idealLow={idealRanges.protein[0]} idealHigh={idealRanges.protein[1]} />
-                </div>
-                </div>
-
-                  {/* 脂質 */}
-                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                    <div style={{ display:'flex', alignItems:'center' }}>
-                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>脂質</span>
-                    </div>
-                    <div className="chart">
-                      <Bar name="脂質" value={selectedMenu.fat} unit="g" denom={30} pass={fPassD}
-                        idealLow={idealRanges.fat[0]} idealHigh={idealRanges.fat[1]} />
-                </div>
-              </div>
-              
-                  {/* 炭水化物 */}
-                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                    <div style={{ display:'flex', alignItems:'center' }}>
-                      <span style={{ fontSize:16, fontWeight:'bold', color:'#333', paddingLeft:'24px' }}>炭水化物</span>
-                    </div>
-                    <div className="chart">
-                      <Bar name="炭水化物" value={selectedMenu.carbs} unit="g" denom={120} pass={cPassD}
-                        idealLow={idealRanges.carbs[0]} idealHigh={idealRanges.carbs[1]} />
-                    </div>
-                  </div>
+                  ))}
                 </div>
               );
             })()}
           </div>
 
           {/* AI評価削除 */}
+
+          {/* 決定ボタン */}
+          <div style={{ marginTop: 40, textAlign: 'center' }}>
+            <a
+              href={(() => {
+                const shopData = menuData.find(item => item.shop === selectedMenu.shop && item.latitude && item.longitude);
+                if (shopData) {
+                  return `https://www.google.com/maps/dir/?api=1&origin=35.7080,139.7731&destination=${shopData.latitude},${shopData.longitude}&travelmode=walking`;
+                }
+                return '#';
+              })()}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => {
+                const shopData = menuData.find(item => item.shop === selectedMenu.shop && item.latitude && item.longitude);
+                if (!shopData) {
+                  e.preventDefault();
+                  alert('この店舗の位置情報が見つかりません');
+                }
+              }}
+              style={{
+                display: 'inline-block',
+                width: '100%',
+                maxWidth: 400,
+                padding: '16px 32px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 12,
+                fontSize: 18,
+                fontWeight: 700,
+                textDecoration: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 16px rgba(102, 126, 234, 0.3)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.4)';
+              }}
+              onMouseLeave={e => {
+                e.target.style.transform = 'translateY(0)';
+                e.target.style.boxShadow = '0 4px 16px rgba(102, 126, 234, 0.3)';
+              }}
+            >
+              この店舗への経路を表示 🗺️
+            </a>
+          </div>
         </div>
       )}
     </div>

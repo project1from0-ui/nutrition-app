@@ -1,13 +1,13 @@
-import { Geist, Geist_Mono, Noto_Serif_JP } from "next/font/google";
+import { Inter, Noto_Serif_JP } from "next/font/google";
 import "./globals.css";
 import "./styles/mobile.css";
 
-const geistSans = Geist({
+const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
+const interMono = Inter({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 });
@@ -28,7 +28,7 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${notoSerifJp.variable} antialiased`}>
+      <body className={`${inter.variable} ${interMono.variable} ${notoSerifJp.variable} antialiased`}>
         {children}
       </body>
     </html>
