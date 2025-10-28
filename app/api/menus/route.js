@@ -11,13 +11,23 @@ export const revalidate = 0;
 function getFirebaseAdmin() {
   if (getApps().length === 0) {
     // 環境変数から認証情報を取得
-    const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 
     if (!privateKey || !clientEmail || !projectId) {
       throw new Error('Firebase Admin credentials are missing');
     }
+
+    // JSON形式でパースを試みる（ダブルクォート付きの場合）
+    try {
+      privateKey = JSON.parse(privateKey);
+    } catch (e) {
+      // JSON形式でない場合はそのまま使用
+    }
+
+    // \nを実際の改行に置き換え
+    privateKey = privateKey.replace(/\\n/g, '\n');
 
     initializeApp({
       credential: cert({
