@@ -14,7 +14,7 @@ const genreColors = {
   '未分類': '#6b7280',
 };
 
-export default function GoogleMap({ menuData, onShopClick, highlightedShop, onShopHover }) {
+export default function GoogleMap({ menuData, onShopClick, highlightedShop, onShopHover, isLoading = false }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
@@ -420,6 +420,35 @@ export default function GoogleMap({ menuData, onShopClick, highlightedShop, onSh
       delete window.handleShopClick;
     };
   }, [menuData, onShopClick]);
+
+  // ローディング時の点滅アニメーション（各ピンがバラバラに点滅）
+  useEffect(() => {
+    if (!isLoading) return;
+
+    const intervals = [];
+
+    markersRef.current.forEach(({ marker }, index) => {
+      let blinkState = true;
+      // 各マーカーにランダムな初期遅延を追加
+      const randomDelay = Math.random() * 300;
+
+      setTimeout(() => {
+        const interval = setInterval(() => {
+          marker.setLabel({
+            text: '📍',
+            fontSize: blinkState ? '32px' : '24px',
+          });
+          blinkState = !blinkState;
+        }, 200 + Math.random() * 100); // 200-300msのランダムな間隔
+
+        intervals.push(interval);
+      }, randomDelay);
+    });
+
+    return () => {
+      intervals.forEach(interval => clearInterval(interval));
+    };
+  }, [isLoading]);
 
   // highlightedShopが変更されたときにマーカーを強調表示
   useEffect(() => {

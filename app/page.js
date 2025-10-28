@@ -84,6 +84,23 @@ const normalizeShop = (s) => (s || '')
   .replace(/\s/g, '')
   .replace(/\[[^\]]*\]/g, '')
   .toLowerCase();
+
+// 2点間の距離を計算（Haversine公式）
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // 地球の半径（メートル）
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+  const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ/2) * Math.sin(Δλ/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+  const distance = R * c; // メートル単位
+  return Math.round(distance); // 整数に丸める
+}
 async function fetchMenuData(classification = null) {
   try {
     const url = classification
@@ -193,12 +210,20 @@ export default function Page() {
   const [healthNotes, setHealthNotes] = useState('');
   const [agreeTerms, setAgreeTerms] = useState(true);
   const [goal, setGoal] = useState('');       // 'diet' | 'bulk'
+  const [mode, setMode] = useState('');       // 'slim' | 'keep' | 'bulk' | 'other'
+  const [targetPeriod, setTargetPeriod] = useState('');  // 目標期間
+  const [targetWeight, setTargetWeight] = useState('');  // 目標体重
+  const [targetBodyFat, setTargetBodyFat] = useState(''); // 目標体脂肪率
+  const [cheatMeter, setCheatMeter] = useState(0); // チートメーター (0-5)
+  const [mealHistory, setMealHistory] = useState([]); // 食事履歴 [{menu, shop, date, isSave, calories, protein, fat, carbs}, ...]
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'
+  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'mode-select'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'
   const [isClient, setIsClient] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showTargetSettings, setShowTargetSettings] = useState(false);
 
   // 位置情報
   const [allowLocation, setAllowLocation] = useState(true);
@@ -322,9 +347,9 @@ export default function Page() {
         console.log('User ID:', result.userId);
         console.log('保存データ:', profileData);
 
-        // プロフィール入力の次はホーム画面へ
+        // プロフィール入力の次はMode選択画面へ
         setShowProfileForm(false);
-        setCurrentSection('home');
+        setCurrentSection('mode-select');
       } else {
         console.error('❌ 保存失敗:', result.error);
         alert('プロフィールの保存に失敗しました: ' + result.error);
@@ -338,10 +363,9 @@ export default function Page() {
   const handleBack = () => {
     if (currentSection === 'terms') setCurrentSection('login');
     else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('login'); }
-    else if (currentSection === 'home') { setShowProfileForm(true); setCurrentSection('profile'); }
-    else if (currentSection === 'mode-select') { setCurrentSection('goal-select'); }
-    else if (currentSection === 'shop-select') { setCurrentSection('goal-select'); }
-    else if (currentSection === 'goal-select') { setCurrentSection('home'); }
+    else if (currentSection === 'mode-select') { setShowProfileForm(true); setCurrentSection('profile'); }
+    else if (currentSection === 'home') { setCurrentSection('mode-select'); }
+    else if (currentSection === 'shop-select') { setCurrentSection('home'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
     else if (currentSection === 'menu-detail') { setCurrentSection('shop-select'); setSelectedMenu(null); }
   };
@@ -350,6 +374,11 @@ export default function Page() {
 
   // 目的選択時の共通処理
   const handleGoalSelection = async (goalType, classificationName) => {
+    // チートボタンを押した場合、メーターをリセット
+    if (goalType === 'cheat') {
+      setCheatMeter(0);
+    }
+
     setGoal(goalType);
     const profile = { birthYear, birthMonth, birthDay, gender, height: parseFloat(height), weight: parseFloat(weight), exerciseFrequency, exerciseTypes: selectedExerciseTypes, goal: goalType };
     setUserProfile(profile);
@@ -849,50 +878,383 @@ ${JSON.stringify(menuData, null, 2)}
 
   return (
     <div className="container" style={styles.container}>
-      {(() => {
-        const activeGoal = (userProfile?.goal || goal || currentGoal);
-        if (!activeGoal) return null;
-        if (!['shop-select','results','menu-detail'].includes(currentSection)) return null;
-        const map = {
-          diet:  { label: '減量モード',     bg: '#dcfce7', color: '#166534' },
-          stay:  { label: '現状維持モード', bg: '#e5e7eb', color: '#111827' },
-          bulk:  { label: 'バルクアップモード', bg: '#fff7ed', color: '#9a3412' },
-          cheat: { label: 'チートモード',   bg: '#fffbeb', color: '#92400e' },
-        };
-        const style = map[activeGoal] || map.diet;
-        return (
-          <div style={{
-            position:'fixed', top:12, left:'50%', transform:'translateX(-50%)',
-            zIndex:1000, fontWeight:900, fontSize:24, color:'#111827'
-          }}>
-            {style.label}
-          </div>
-        );
-      })()}
       {/* ログイン */}
       {currentSection === 'login' && (
         <div style={styles.card}>
-          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 20px', display: 'block' }} />
+          <p style={{ textAlign:'center', color:'#667eea', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>外食AIエージェント</p>
+          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 8px', display: 'block' }} />
           <p style={{ textAlign:'center', color:'#666', marginBottom: 30 }}>最適な食事をAIで見つけよう</p>
           <button style={styles.button} onClick={handleLogin}>Start</button>
+        </div>
+      )}
+
+      {/* Mode選択画面 */}
+      {currentSection === 'mode-select' && (
+        <div style={styles.card}>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
+          <h1 style={{ ...styles.title, marginBottom: 40 }}>Mode</h1>
+
+          {/* メインモードボタン（3つ） */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+            <button
+              onClick={() => { setMode('slim'); setCurrentSection('home'); }}
+              style={{
+                padding: '24px 32px',
+                background: mode === 'slim' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
+                color: mode === 'slim' ? 'white' : '#667eea',
+                border: `2px solid ${mode === 'slim' ? 'transparent' : '#667eea'}`,
+                borderRadius: 12,
+                fontSize: 20,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                if (mode !== 'slim') {
+                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.color = 'white';
+                }
+              }}
+              onMouseLeave={e => {
+                if (mode !== 'slim') {
+                  e.target.style.background = 'white';
+                  e.target.style.color = '#667eea';
+                }
+              }}
+            >
+              SLIM（痩せたい）
+            </button>
+
+            <button
+              onClick={() => { setMode('keep'); setCurrentSection('home'); }}
+              style={{
+                padding: '24px 32px',
+                background: mode === 'keep' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
+                color: mode === 'keep' ? 'white' : '#667eea',
+                border: `2px solid ${mode === 'keep' ? 'transparent' : '#667eea'}`,
+                borderRadius: 12,
+                fontSize: 20,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                if (mode !== 'keep') {
+                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.color = 'white';
+                }
+              }}
+              onMouseLeave={e => {
+                if (mode !== 'keep') {
+                  e.target.style.background = 'white';
+                  e.target.style.color = '#667eea';
+                }
+              }}
+            >
+              KEEP（体型を維持したい）
+            </button>
+
+            <button
+              onClick={() => { setMode('bulk'); setCurrentSection('home'); }}
+              style={{
+                padding: '24px 32px',
+                background: mode === 'bulk' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
+                color: mode === 'bulk' ? 'white' : '#667eea',
+                border: `2px solid ${mode === 'bulk' ? 'transparent' : '#667eea'}`,
+                borderRadius: 12,
+                fontSize: 20,
+                fontWeight: 700,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                if (mode !== 'bulk') {
+                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.color = 'white';
+                }
+              }}
+              onMouseLeave={e => {
+                if (mode !== 'bulk') {
+                  e.target.style.background = 'white';
+                  e.target.style.color = '#667eea';
+                }
+              }}
+            >
+              BULK（筋肉を付けたい）
+            </button>
+          </div>
+
+          {/* その他ボタン（小さい） */}
+          <div style={{ textAlign: 'center', marginBottom: 30 }}>
+            <button
+              onClick={() => { setMode('other'); setCurrentSection('home'); }}
+              style={{
+                padding: '8px 16px',
+                background: mode === 'other' ? '#667eea' : 'transparent',
+                color: mode === 'other' ? 'white' : '#999',
+                border: `1px solid ${mode === 'other' ? '#667eea' : '#e5e7eb'}`,
+                borderRadius: 6,
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                if (mode !== 'other') {
+                  e.target.style.borderColor = '#667eea';
+                  e.target.style.color = '#667eea';
+                }
+              }}
+              onMouseLeave={e => {
+                if (mode !== 'other') {
+                  e.target.style.borderColor = '#e5e7eb';
+                  e.target.style.color = '#999';
+                }
+              }}
+            >
+              その他
+            </button>
+          </div>
+
+          {/* オプション設定リンク */}
+          <div style={{ textAlign: 'right', marginTop: 20 }}>
+            <button
+              onClick={() => setShowTargetSettings(!showTargetSettings)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#999',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                textDecoration: 'underline',
+                padding: 0
+              }}
+              onMouseEnter={e => e.target.style.color = '#667eea'}
+              onMouseLeave={e => e.target.style.color = '#999'}
+            >
+              期間や目標の設定はこちら
+            </button>
+          </div>
+
+          {/* オプション設定欄（展開時） */}
+          {showTargetSettings && (
+            <div style={{
+              marginTop: 16,
+              padding: '16px',
+              background: '#f8f9fa',
+              borderRadius: 8,
+              border: '1px solid #e5e7eb'
+            }}>
+              {/* 期間を設定 */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{
+                  display: 'block',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#666',
+                  marginBottom: 6
+                }}>
+                  期間を設定（オプション）
+                </label>
+                <input
+                  type="text"
+                  value={targetPeriod}
+                  onChange={(e) => setTargetPeriod(e.target.value)}
+                  placeholder="例: 3ヶ月"
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    outline: 'none'
+                  }}
+                  onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                  onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                />
+              </div>
+
+              {/* 目標体重・体脂肪 */}
+              <div>
+                <label style={{
+                  display: 'block',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#666',
+                  marginBottom: 6
+                }}>
+                  目標体重・体脂肪（オプション）
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={targetWeight}
+                    onChange={(e) => setTargetWeight(e.target.value)}
+                    placeholder="体重 (kg)"
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      outline: 'none'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                  />
+                  <input
+                    type="text"
+                    value={targetBodyFat}
+                    onChange={(e) => setTargetBodyFat(e.target.value)}
+                    placeholder="体脂肪率 (%)"
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      outline: 'none'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = '#667eea'}
+                    onBlur={(e) => e.target.style.borderColor = '#e5e7eb'}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* ホーム画面 */}
       {currentSection === 'home' && (
         <div style={styles.card}>
-          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 20px', display: 'block' }} />
-          <h1 style={{ ...styles.title, marginBottom: 12 }}>ようこそ、BULKへ</h1>
-          <p style={{ textAlign:'center', color:'#666', marginBottom: 40, fontSize: 16 }}>
-            AIがあなたに最適な食事を提案します
-          </p>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
+
+          {/* ハンバーガーメニューボタン */}
+          <button
+            onClick={() => setShowMenu(!showMenu)}
+            style={{
+              position: 'fixed',
+              top: 20,
+              right: 20,
+              width: 40,
+              height: 40,
+              background: 'white',
+              border: '2px solid #667eea',
+              borderRadius: 8,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: 4,
+              padding: 0,
+              zIndex: 1000,
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = '#667eea';
+              Array.from(e.target.children).forEach(child => child.style.background = 'white');
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = 'white';
+              Array.from(e.target.children).forEach(child => child.style.background = '#667eea');
+            }}
+          >
+            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
+            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
+            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
+          </button>
+
+          {/* メニューパネル */}
+          {showMenu && (
+            <div style={{
+              position: 'fixed',
+              top: 70,
+              right: 20,
+              width: 250,
+              background: 'white',
+              border: '2px solid #667eea',
+              borderRadius: 12,
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
+              zIndex: 999,
+              overflow: 'hidden'
+            }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#111827' }}>メニュー</h3>
+              </div>
+              <div style={{ padding: '8px 0' }}>
+                <button
+                  onClick={() => { setCurrentSection('mode-select'); setShowMenu(false); }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#374151',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s ease'
+                  }}
+                  onMouseEnter={e => e.target.style.background = '#f3f4f6'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  Mode設定
+                </button>
+                <button
+                  onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); setShowMenu(false); }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#374151',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s ease'
+                  }}
+                  onMouseEnter={e => e.target.style.background = '#f3f4f6'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  プロフィール編集
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 選択されたMode表示 */}
+          {mode && (
+            <div style={{
+              textAlign: 'center',
+              marginBottom: 30
+            }}>
+              <span style={{
+                fontSize: 32,
+                fontWeight: 800,
+                color: '#111827'
+              }}>
+                {mode === 'slim' && 'SLIM'}
+                {mode === 'keep' && 'KEEP'}
+                {mode === 'bulk' && 'BULK'}
+                {mode === 'other' && 'OTHER'}
+              </span>
+            </div>
+          )}
 
           {/* メインアクションカード */}
           <div style={{
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             borderRadius: 16,
             padding: 32,
-            marginBottom: 24,
             boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)',
             color: 'white',
             textAlign: 'center'
@@ -902,83 +1264,187 @@ ${JSON.stringify(menuData, null, 2)}
               半径200m圏内のレストランから<br />あなたの目的に合ったメニューを見つけます
             </p>
             <button
-              onClick={() => setCurrentSection('goal-select')}
+              onClick={() => {
+                // modeに基づいて分類を決定
+                let goalType = 'diet';
+                let classification = '減量';
+
+                if (mode === 'slim') {
+                  goalType = 'diet';
+                  classification = '減量';
+                } else if (mode === 'keep') {
+                  goalType = 'stay';
+                  classification = '現状維持';
+                } else if (mode === 'bulk') {
+                  goalType = 'bulk';
+                  classification = 'バルクアップ';
+                } else if (mode === 'other') {
+                  goalType = 'diet';
+                  classification = '減量';
+                }
+
+                handleGoalSelection(goalType, classification);
+              }}
               style={{
-                width: '100%',
-                padding: '16px 32px',
+                width: 120,
+                height: 120,
                 background: 'white',
                 color: '#667eea',
                 border: 'none',
-                borderRadius: 12,
-                fontSize: 16,
+                borderRadius: '50%',
+                fontSize: 18,
                 fontWeight: 700,
                 cursor: 'pointer',
                 boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                margin: '0 auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}
               onMouseEnter={e => {
-                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.transform = 'scale(1.05)';
                 e.target.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.2)';
               }}
               onMouseLeave={e => {
-                e.target.style.transform = 'translateY(0)';
+                e.target.style.transform = 'scale(1)';
                 e.target.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
               }}
             >
-              メニューを探す →
+              Search
             </button>
           </div>
 
-          {/* 機能紹介カード */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
-            <div style={{
-              background: '#f8f9fa',
-              borderRadius: 12,
-              padding: 20,
-              textAlign: 'center',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🎯</div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>目的別提案</h3>
-              <p style={{ fontSize: 12, color: '#6b7280' }}>減量・維持・増量</p>
+          {/* チートボタン */}
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
+            <button
+              onClick={() => cheatMeter >= 5 ? handleGoalSelection('cheat', 'チート') : null}
+              disabled={cheatMeter < 5}
+              style={{
+                padding: '12px 24px',
+                background: cheatMeter >= 5 ? 'transparent' : '#e5e7eb',
+                color: cheatMeter >= 5 ? '#f59e0b' : '#9ca3af',
+                border: cheatMeter >= 5 ? '2px solid #f59e0b' : '2px solid #d1d5db',
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 700,
+                cursor: cheatMeter >= 5 ? 'pointer' : 'not-allowed',
+                transition: 'all 0.2s ease',
+                opacity: cheatMeter >= 5 ? 1 : 0.5
+              }}
+              onMouseEnter={e => {
+                if (cheatMeter >= 5) {
+                  e.target.style.background = '#f59e0b';
+                  e.target.style.color = 'white';
+                }
+              }}
+              onMouseLeave={e => {
+                if (cheatMeter >= 5) {
+                  e.target.style.background = 'transparent';
+                  e.target.style.color = '#f59e0b';
+                }
+              }}
+            >
+              チート {cheatMeter < 5 && `(${cheatMeter}/5)`}
+            </button>
+
+            {/* チートメーター */}
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 8 }}>
+              {[1, 2, 3, 4, 5].map((num) => (
+                <div
+                  key={num}
+                  style={{
+                    width: 40,
+                    height: 8,
+                    borderRadius: 4,
+                    background: num <= cheatMeter
+                      ? 'linear-gradient(135deg, #f59e0b 0%, #f97316 100%)'
+                      : '#e5e7eb',
+                    transition: 'all 0.3s ease',
+                    boxShadow: num <= cheatMeter ? '0 2px 4px rgba(245, 158, 11, 0.3)' : 'none'
+                  }}
+                />
+              ))}
             </div>
-            <div style={{
-              background: '#f8f9fa',
-              borderRadius: 12,
-              padding: 20,
-              textAlign: 'center',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>🤖</div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>AI解析</h3>
-              <p style={{ fontSize: 12, color: '#6b7280' }}>栄養バランス最適化</p>
-            </div>
+
+            {/* セーブ回数説明 */}
+            {cheatMeter < 5 && (
+              <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 8 }}>
+                あと{5 - cheatMeter}回セーブするとチートできます
+              </p>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div style={{
-              background: '#f8f9fa',
-              borderRadius: 12,
-              padding: 20,
-              textAlign: 'center',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📍</div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>位置情報連動</h3>
-              <p style={{ fontSize: 12, color: '#6b7280' }}>近隣店舗を検索</p>
+          {/* 食事履歴セクション */}
+          {mealHistory.length > 0 && (
+            <div style={{ marginTop: 40, padding: 20, background: '#f9fafb', borderRadius: 12 }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, color: '#111827', marginBottom: 16, textAlign: 'center' }}>
+                食事履歴
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: 400, overflowY: 'auto' }}>
+                {mealHistory.slice(0, 10).map((entry, index) => {
+                  const date = new Date(entry.date);
+                  const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
+
+                  return (
+                    <div
+                      key={index}
+                      style={{
+                        padding: 12,
+                        background: 'white',
+                        borderRadius: 8,
+                        border: entry.isSave ? '2px solid #10b981' : '2px solid #f59e0b',
+                        position: 'relative'
+                      }}
+                    >
+                      {/* セーブバッジ */}
+                      <div style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        padding: '2px 8px',
+                        borderRadius: 4,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        background: entry.isSave ? '#dcfce7' : '#fef3c7',
+                        color: entry.isSave ? '#166534' : '#92400e'
+                      }}>
+                        {entry.isSave ? 'セーブ' : 'チート'}
+                      </div>
+
+                      {/* 日時 */}
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>
+                        {dateStr}
+                      </div>
+
+                      {/* メニュー名 */}
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>
+                        {entry.menu}
+                      </div>
+
+                      {/* 店舗名 */}
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>
+                        {entry.shop}
+                      </div>
+
+                      {/* 栄養情報 */}
+                      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: '#6b7280' }}>
+                        <span>カロリー: {entry.calories}kcal</span>
+                        <span>P: {entry.protein}g</span>
+                        <span>F: {entry.fat}g</span>
+                        <span>C: {entry.carbs}g</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {mealHistory.length > 10 && (
+                <p style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', marginTop: 12 }}>
+                  最新10件を表示中（全{mealHistory.length}件）
+                </p>
+              )}
             </div>
-            <div style={{
-              background: '#f8f9fa',
-              borderRadius: 12,
-              padding: 20,
-              textAlign: 'center',
-              border: '1px solid #e5e7eb'
-            }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📊</div>
-              <h3 style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 4 }}>詳細な栄養情報</h3>
-              <p style={{ fontSize: 12, color: '#6b7280' }}>PFC バランス表示</p>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -1031,6 +1497,7 @@ ${JSON.stringify(menuData, null, 2)}
               <GoogleMap
                 menuData={menuData}
                 onShopClick={() => {}}
+                isLoading={true}
               />
             </div>
           )}
@@ -1263,7 +1730,7 @@ ${JSON.stringify(menuData, null, 2)}
       {currentSection === 'shop-select' && (
         <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>近隣メニュー解析結果</h1>
+          <h1 style={styles.title}>近隣Top5メニュー</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -1308,86 +1775,10 @@ ${JSON.stringify(menuData, null, 2)}
                       }
 
                       // Gemini評価済みデータがあればそれを使用、なければtop10を使用
-                      const displayMenus = geminiEvaluatedMenus.length > 0 ? geminiEvaluatedMenus : top10;
+                      const displayMenus = (geminiEvaluatedMenus.length > 0 ? geminiEvaluatedMenus : top10).slice(0, 5);
 
                       return (
                         <>
-                          {/* 地図表示（Top10の店舗のみ） */}
-                          {isClient && (
-                            <div style={{ marginBottom: 16 }}>
-                              <GoogleMap
-                                menuData={displayMenus}
-                                highlightedShop={highlightedShop}
-                                onShopHover={(shop) => setHighlightedShop(shop)}
-                                onShopClick={(shop) => {
-                                  setSelectedShop(shop);
-                                  const filtered = menuData.filter(item =>
-                                    normalizeShop(item.shop).includes(normalizeShop(shop))
-                                  );
-                                  if (filtered.length === 0) return alert('この店舗のデータが見つかりません');
-                                  const results = buildResults(filtered, userProfile);
-                                  setScoredMenus(results);
-                                  setGradeFilter('ALL');
-                                  setShopCategoryFilter('ALL');
-                                  setCurrentSection('menu-detail');
-                                }}
-                              />
-                            </div>
-                          )}
-
-                          {/* タイトル */}
-                          <h2 style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 16, textAlign: 'center' }}>おすすめTop10メニュー</h2>
-
-                          {/* メニューリスト */}
-                          <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto', marginBottom: 20 }}>
-                            {displayMenus.map((m, i) => {
-                              const isHighlighted = highlightedShop === m.shop;
-                              return (
-                                <button
-                                  key={`${m.shop}-${m.menu}-${i}`}
-                                  onClick={() => { setSelectedMenu(m); setCurrentSection('menu-detail'); }}
-                                  style={{
-                                    padding:8,
-                                    border: isHighlighted ? '2px solid #667eea' : '1px solid #e5e7eb',
-                                    borderRadius:8,
-                                    background: isHighlighted ? '#f0f4ff' : '#fff',
-                                    color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer',
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    transition: 'all 0.2s ease'
-                                  }}
-                                  onMouseEnter={e=>{
-                                    e.currentTarget.style.borderColor='#667eea';
-                                    e.currentTarget.style.borderWidth='2px';
-                                    e.currentTarget.style.background='#f0f4ff';
-                                    setHighlightedShop(m.shop);
-                                  }}
-                                  onMouseLeave={e=>{
-                                    if (highlightedShop !== m.shop) {
-                                      e.currentTarget.style.borderColor='#e5e7eb';
-                                      e.currentTarget.style.borderWidth='1px';
-                                      e.currentTarget.style.background='#fff';
-                                    }
-                                    setHighlightedShop(null);
-                                  }}
-                                >
-                                  <div style={{ flex: 1 }}>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                                      <span style={{ fontSize: 16, fontWeight: 800, color: '#667eea' }}>{i + 1}位</span>
-                                      <span style={{ fontSize: 11, color: '#999', fontWeight: 500 }}>{m.shop || ''}</span>
-                                      {m.source === 'menuItemsHirokojiClass' && (
-                                        <span style={{ fontSize: 10, color: '#667eea', fontWeight: 600, padding: '2px 6px', background: '#eff6ff', borderRadius: 4 }}>公式</span>
-                                      )}
-                                    </div>
-                                    <div style={{ fontSize: 14, color: '#111827', fontWeight: 600, paddingLeft: 4 }}>
-                                      {m.menu || ''}
-                                    </div>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
 
                           {/* BULK AI入力欄 */}
                           <div style={{
@@ -1396,14 +1787,6 @@ ${JSON.stringify(menuData, null, 2)}
                             borderRadius: 12,
                             border: '1px solid #e5e7eb'
                           }}>
-                            <h3 style={{
-                              fontSize: 14,
-                              fontWeight: 700,
-                              color: '#667eea',
-                              marginBottom: 12
-                            }}>
-                              BULK AI
-                            </h3>
                             <div style={{ display: 'flex', gap: 8 }}>
                               <input
                                 type="text"
@@ -1443,7 +1826,7 @@ ${JSON.stringify(menuData, null, 2)}
                                   whiteSpace: 'nowrap'
                                 }}
                               >
-                                要望
+                                BULK AIに要望
                               </button>
                             </div>
 
@@ -1481,6 +1864,59 @@ ${JSON.stringify(menuData, null, 2)}
                                 ))}
                               </div>
                             )}
+                          </div>
+
+                          {/* メニューリスト */}
+                          <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto', marginBottom: 20, marginTop: 20 }}>
+                            {displayMenus.map((m, i) => {
+                              const isHighlighted = highlightedShop === m.shop;
+                              return (
+                                <button
+                                  key={`${m.shop}-${m.menu}-${i}`}
+                                  onClick={() => { setSelectedMenu(m); setCurrentSection('menu-detail'); }}
+                                  style={{
+                                    padding:8,
+                                    border: isHighlighted ? '2px solid #667eea' : '1px solid #e5e7eb',
+                                    borderRadius:8,
+                                    background: isHighlighted ? '#f0f4ff' : '#fff',
+                                    color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    transition: 'all 0.2s ease'
+                                  }}
+                                  onMouseEnter={e=>{
+                                    e.currentTarget.style.borderColor='#667eea';
+                                    e.currentTarget.style.borderWidth='2px';
+                                    e.currentTarget.style.background='#f0f4ff';
+                                    setHighlightedShop(m.shop);
+                                  }}
+                                  onMouseLeave={e=>{
+                                    if (highlightedShop !== m.shop) {
+                                      e.currentTarget.style.borderColor='#e5e7eb';
+                                      e.currentTarget.style.borderWidth='1px';
+                                      e.currentTarget.style.background='#fff';
+                                    }
+                                    setHighlightedShop(null);
+                                  }}
+                                >
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                      <span style={{ fontSize: 16, fontWeight: 800, color: '#667eea' }}>{i + 1}位</span>
+                                      <span style={{ fontSize: 11, color: '#999', fontWeight: 500 }}>{m.shop || ''}</span>
+                                    </div>
+                                    <div style={{ fontSize: 14, color: '#111827', fontWeight: 600, paddingLeft: 4 }}>
+                                      {m.menu || ''}
+                                    </div>
+                                  </div>
+                                  {m.latitude && m.longitude && (
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: '#667eea', whiteSpace: 'nowrap', marginLeft: 8 }}>
+                                      {calculateDistance(35.7080, 139.7731, m.latitude, m.longitude)}m
+                                    </div>
+                                  )}
+                                </button>
+                              );
+                            })}
                           </div>
                         </>
                       );
@@ -1546,8 +1982,14 @@ ${JSON.stringify(menuData, null, 2)}
                 onMouseEnter={e=>{ e.currentTarget.style.borderColor='#667eea'; e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; }}
                 onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.04)'; }}
               >
-                
-                <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, gap: 16 }}>
+                  <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
+                  {m.latitude && m.longitude && (
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#667eea', whiteSpace: 'nowrap' }}>
+                      {calculateDistance(35.7080, 139.7731, m.latitude, m.longitude)}m
+                    </div>
+                  )}
+                </div>
               </button>
             ))}
           </div>
@@ -1561,6 +2003,70 @@ ${JSON.stringify(menuData, null, 2)}
           <div className="detail-header">
             <h1 style={styles.title}>{selectedMenu.menu}</h1>
             <p style={{ textAlign:'center', color:'#666', marginBottom:20, fontSize:18 }}>{selectedMenu.shop} - {selectedMenu.category}</p>
+          </div>
+
+          {/* このメニューに決定ボタン（上部） */}
+          <div style={{ marginBottom: 30, textAlign: 'center' }}>
+            <button
+              onClick={() => {
+                // セーブ判定: 4つの栄養素すべてが基準をクリアしているか
+                const activeRangesDetail = getActiveRangesForJudge((userProfile?.goal || currentGoal), gradeFilter);
+                const kcalPass = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
+                const pPass = isMetricPass(selectedMenu.protein, activeRangesDetail, 'protein');
+                const fPass = isMetricPass(selectedMenu.fat, activeRangesDetail, 'fat');
+                const cPass = isMetricPass(selectedMenu.carbs, activeRangesDetail, 'carbs');
+
+                const isSave = kcalPass && pPass && fPass && cPass;
+
+                // 食事履歴に追加
+                const historyEntry = {
+                  menu: selectedMenu.menu,
+                  shop: selectedMenu.shop,
+                  date: new Date().toISOString(),
+                  isSave: isSave,
+                  calories: selectedMenu.calories,
+                  protein: selectedMenu.protein,
+                  fat: selectedMenu.fat,
+                  carbs: selectedMenu.carbs
+                };
+                setMealHistory(prev => [historyEntry, ...prev]);
+
+                if (isSave && cheatMeter < 5) {
+                  setCheatMeter(prev => Math.min(prev + 1, 5));
+                  alert('セーブ成功！チートメーターが1つ貯まりました 🎉');
+                } else if (isSave && cheatMeter >= 5) {
+                  alert('既にチートメーターが満タンです！');
+                } else {
+                  alert('このメニューは栄養基準を満たしていないため、セーブできません');
+                }
+
+                // ホーム画面に戻る
+                setCurrentSection('home');
+                setSelectedMenu(null);
+              }}
+              style={{
+                padding: '16px 48px',
+                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: 12,
+                fontSize: 16,
+                fontWeight: 800,
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+                transition: 'all 0.2s ease'
+              }}
+              onMouseEnter={e => {
+                e.target.style.transform = 'translateY(-2px)';
+                e.target.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
+              }}
+              onMouseLeave={e => {
+                e.target.style.transform = 'translateY(0)';
+                e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+              }}
+            >
+              このメニューに決定（経路を表示）
+            </button>
           </div>
 
           {/* メニュー画像 */}
@@ -1623,59 +2129,80 @@ ${JSON.stringify(menuData, null, 2)}
               const cPassD    = isMetricPass(selectedMenu.carbs,    activeRangesDetail, 'carbs');
               const idealRanges = ((userProfile?.goal || currentGoal) === 'bulk') ? RANGES_BULK.S : RANGES_DIET.S;
 
-              const nutrients = [
-                { label:'エネルギー', value:selectedMenu.calories, unit:'kcal', denom:1000, pass:kcalPassD, idealLow:idealRanges.calories[0], idealHigh:idealRanges.calories[1] },
+              const calorieNutrient = { label:'エネルギー', value:selectedMenu.calories, unit:'kcal', denom:1000, pass:kcalPassD, idealLow:idealRanges.calories[0], idealHigh:idealRanges.calories[1] };
+              const pfcNutrients = [
                 { label:'たんぱく質', value:selectedMenu.protein, unit:'g', denom:50, pass:pPassD, idealLow:idealRanges.protein[0], idealHigh:idealRanges.protein[1] },
                 { label:'脂質', value:selectedMenu.fat, unit:'g', denom:30, pass:fPassD, idealLow:idealRanges.fat[0], idealHigh:idealRanges.fat[1] },
                 { label:'炭水化物', value:selectedMenu.carbs, unit:'g', denom:120, pass:cPassD, idealLow:idealRanges.carbs[0], idealHigh:idealRanges.carbs[1] }
               ];
 
               return (
-                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-                  {nutrients.map((n, idx) => (
-                    <div key={idx} style={{ display:'flex', alignItems:'center', gap:16 }}>
-                      <div style={{ width:100, fontSize:14, fontWeight:600, color:'#374151', textAlign:'right' }}>
-                        {n.label}
+                <div style={{ padding: 16, background: '#f9fafb', borderRadius: 12 }}>
+                  <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                    {/* カロリー */}
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                        <span style={{ fontSize:14, fontWeight:700, color:'#111827' }}>
+                          {calorieNutrient.label}
+                        </span>
+                        <span style={{ fontSize:18, fontWeight:800, color: calorieNutrient.pass ? '#667eea' : '#ef4444' }}>
+                          {Number.isFinite(calorieNutrient.value) ? `${calorieNutrient.value} ${calorieNutrient.unit}` : '-'}
+                        </span>
                       </div>
-                      <div style={{ flex:1, position:'relative' }}>
+                      <div style={{ position:'relative' }}>
                         <div style={{
-                          height:40,
-                          background:'#f3f4f6',
-                          borderRadius:8,
-                          overflow:'hidden',
-                          position:'relative',
-                          border:`2px solid ${n.pass ? '#e5e7eb' : '#fca5a5'}`
+                          height:14,
+                          background:'#e5e7eb',
+                          borderRadius:7,
+                          overflow:'hidden'
                         }}>
                           <div style={{
-                            width:`${Math.min((n.value / n.denom) * 100, 100)}%`,
+                            width:`${Math.min((calorieNutrient.value / calorieNutrient.denom) * 100, 100)}%`,
                             height:'100%',
-                            background:n.pass ? 'linear-gradient(90deg, #667eea, #764ba2)' : 'linear-gradient(90deg, #f093fb, #f5576c)',
-                            transition:'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-                            position:'relative'
+                            background: calorieNutrient.pass
+                              ? 'linear-gradient(90deg, #667eea, #764ba2)'
+                              : 'linear-gradient(90deg, #f87171, #ef4444)',
+                            borderRadius:7,
+                            transition:'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+                          }}>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* PFC（たんぱく質・脂質・炭水化物） */}
+                    {pfcNutrients.map((n, idx) => (
+                      <div key={idx} style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                          <span style={{ fontSize:13, fontWeight:600, color:'#374151' }}>
+                            {n.label}
+                          </span>
+                          <span style={{ fontSize:15, fontWeight:800, color: n.pass ? '#667eea' : '#ef4444' }}>
+                            {Number.isFinite(n.value) ? `${n.value} ${n.unit}` : '-'}
+                          </span>
+                        </div>
+                        <div style={{ position:'relative' }}>
+                          <div style={{
+                            height:10,
+                            background:'#e5e7eb',
+                            borderRadius:5,
+                            overflow:'hidden'
                           }}>
                             <div style={{
-                              position:'absolute',
-                              right:12,
-                              top:'50%',
-                              transform:'translateY(-50%)',
-                              fontSize:15,
-                              fontWeight:700,
-                              color:'white',
-                              textShadow:'0 1px 2px rgba(0,0,0,0.2)'
+                              width:`${Math.min((n.value / n.denom) * 100, 100)}%`,
+                              height:'100%',
+                              background: n.pass
+                                ? 'linear-gradient(90deg, #667eea, #764ba2)'
+                                : 'linear-gradient(90deg, #f87171, #ef4444)',
+                              borderRadius:5,
+                              transition:'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
                             }}>
-                              {Number.isFinite(n.value) ? `${n.value} ${n.unit}` : '-'}
                             </div>
                           </div>
                         </div>
-                        {!n.pass && (
-                          <div style={{ position:'absolute', top:42, left:0, fontSize:11, color:'#dc2626', fontWeight:600 }}>
-                            {n.value > n.idealHigh ? `+${(n.value - n.idealHigh).toFixed(0)}${n.unit} 超過` :
-                             n.value < n.idealLow ? `-${(n.idealLow - n.value).toFixed(0)}${n.unit} 不足` : ''}
-                          </div>
-                        )}
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               );
             })()}
@@ -1683,52 +2210,85 @@ ${JSON.stringify(menuData, null, 2)}
 
           {/* AI評価削除 */}
 
-          {/* 決定ボタン */}
-          <div style={{ marginTop: 40, textAlign: 'center' }}>
-            <a
-              href={(() => {
-                const shopData = menuData.find(item => item.shop === selectedMenu.shop && item.latitude && item.longitude);
-                if (shopData) {
-                  return `https://www.google.com/maps/dir/?api=1&origin=35.7080,139.7731&destination=${shopData.latitude},${shopData.longitude}&travelmode=walking`;
+          {/* 店舗の地図表示 */}
+          {isClient && selectedMenu && (() => {
+            const shopData = menuData.find(item => item.shop === selectedMenu.shop && item.latitude && item.longitude);
+            if (shopData) {
+              return (
+                <div style={{ marginTop: 30, marginBottom: 30 }}>
+                  <h2 style={{ fontSize: 22, fontWeight: 800, color: '#111827', marginBottom: 16 }}>店舗位置</h2>
+                  <GoogleMap
+                    menuData={[shopData]}
+                    onShopClick={() => {}}
+                  />
+                </div>
+              );
+            }
+            return null;
+          })()}
+
+          {/* このメニューを食べるボタン */}
+          <div style={{ marginTop: 30, textAlign: 'center' }}>
+            <button
+              onClick={() => {
+                // セーブ判定: 4つの栄養素すべてが基準をクリアしているか
+                const activeRangesDetail = getActiveRangesForJudge((userProfile?.goal || currentGoal), gradeFilter);
+                const kcalPass = isMetricPass(selectedMenu.calories, activeRangesDetail, 'calories');
+                const pPass = isMetricPass(selectedMenu.protein, activeRangesDetail, 'protein');
+                const fPass = isMetricPass(selectedMenu.fat, activeRangesDetail, 'fat');
+                const cPass = isMetricPass(selectedMenu.carbs, activeRangesDetail, 'carbs');
+
+                const isSave = kcalPass && pPass && fPass && cPass;
+
+                // 食事履歴に追加
+                const historyEntry = {
+                  menu: selectedMenu.menu,
+                  shop: selectedMenu.shop,
+                  date: new Date().toISOString(),
+                  isSave: isSave,
+                  calories: selectedMenu.calories,
+                  protein: selectedMenu.protein,
+                  fat: selectedMenu.fat,
+                  carbs: selectedMenu.carbs
+                };
+                setMealHistory(prev => [historyEntry, ...prev]);
+
+                if (isSave && cheatMeter < 5) {
+                  setCheatMeter(prev => Math.min(prev + 1, 5));
+                  alert('セーブ成功！チートメーターが1つ貯まりました 🎉');
+                } else if (isSave && cheatMeter >= 5) {
+                  alert('既にチートメーターが満タンです！');
+                } else {
+                  alert('このメニューは栄養基準を満たしていないため、セーブできません');
                 }
-                return '#';
-              })()}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => {
-                const shopData = menuData.find(item => item.shop === selectedMenu.shop && item.latitude && item.longitude);
-                if (!shopData) {
-                  e.preventDefault();
-                  alert('この店舗の位置情報が見つかりません');
-                }
+
+                // ホーム画面に戻る
+                setCurrentSection('home');
+                setSelectedMenu(null);
               }}
               style={{
-                display: 'inline-block',
-                width: '100%',
-                maxWidth: 400,
-                padding: '16px 32px',
+                padding: '16px 48px',
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 color: 'white',
                 border: 'none',
                 borderRadius: 12,
-                fontSize: 18,
-                fontWeight: 700,
-                textDecoration: 'none',
+                fontSize: 16,
+                fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: '0 4px 16px rgba(102, 126, 234, 0.3)',
+                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
                 transition: 'all 0.2s ease'
               }}
               onMouseEnter={e => {
                 e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.4)';
+                e.target.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
               }}
               onMouseLeave={e => {
                 e.target.style.transform = 'translateY(0)';
-                e.target.style.boxShadow = '0 4px 16px rgba(102, 126, 234, 0.3)';
+                e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
               }}
             >
-              この店舗への経路を表示 🗺️
-            </a>
+              このメニューに決定（経路を表示）
+            </button>
           </div>
         </div>
       )}
