@@ -1,23 +1,58 @@
 import { NextResponse } from 'next/server';
-import { db } from '../../../lib/firebase';
-import { collection, addDoc, doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// Firebase Admin初期化
+function getFirebaseAdmin() {
+  if (getApps().length === 0) {
+    let privateKey = process.env.FIREBASE_PRIVATE_KEY;
+    const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+    const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+
+    if (!privateKey || !clientEmail || !projectId) {
+      throw new Error('Firebase Admin credentials are missing');
+    }
+
+    try {
+      privateKey = JSON.parse(privateKey);
+    } catch (e) {
+      // JSON形式でない場合はそのまま使用
+    }
+
+    privateKey = privateKey.replace(/\\n/g, '\n');
+
+    initializeApp({
+      credential: cert({
+        projectId,
+        clientEmail,
+        privateKey,
+      }),
+    });
+  }
+  return getFirestore();
+}
 
 // プロフィールを保存（POST）
 export async function POST(request) {
   try {
+    const db = getFirebaseAdmin();
     const profileData = await request.json();
 
     // タイムスタンプを追加
     const dataToSave = {
       ...profileData,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp()
     };
 
     // ユーザーIDがある場合は更新、ない場合は新規作成
     if (profileData.userId) {
-      const docRef = doc(db, 'profiles', profileData.userId);
-      await setDoc(docRef, dataToSave, { merge: true });
+      const docRef = db.collection('profiles').doc(profileData.userId);
+      await docRef.set(dataToSave, { merge: true });
 
       return NextResponse.json({
         success: true,
@@ -26,7 +61,7 @@ export async function POST(request) {
       });
     } else {
       // 新規作成
-      const docRef = await addDoc(collection(db, 'profiles'), dataToSave);
+      const docRef = await db.collection('profiles').add(dataToSave);
 
       return NextResponse.json({
         success: true,
@@ -46,6 +81,7 @@ export async function POST(request) {
 // プロフィールを取得（GET）
 export async function GET(request) {
   try {
+    const db = getFirebaseAdmin();
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
 
@@ -56,10 +92,10 @@ export async function GET(request) {
       );
     }
 
-    const docRef = doc(db, 'profiles', userId);
-    const docSnap = await getDoc(docRef);
+    const docRef = db.collection('profiles').doc(userId);
+    const docSnap = await docRef.get();
 
-    if (docSnap.exists()) {
+    if (docSnap.exists) {
       return NextResponse.json({
         success: true,
         profile: { id: docSnap.id, ...docSnap.data() }

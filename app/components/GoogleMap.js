@@ -14,7 +14,7 @@ const genreColors = {
   '未分類': '#6b7280',
 };
 
-export default function GoogleMap({ menuData, onShopClick, highlightedShop, onShopHover, isLoading = false }) {
+export default function GoogleMap({ menuData, userLocation, nearbyStores, onShopClick, highlightedShop, onShopHover, isLoading = false }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
@@ -53,41 +53,70 @@ export default function GoogleMap({ menuData, onShopClick, highlightedShop, onSh
     const initializeMap = () => {
       if (!window.google || !mapContainerRef.current) return;
 
-      console.log('[GoogleMap] menuData件数:', menuData.length);
-      console.log('[GoogleMap] menuDataサンプル:', menuData.slice(0, 2));
+      // ローディング画面モード（userLocation + nearbyStores）とメニュー表示モード（menuData）を判定
+      const isLoadingMode = userLocation && nearbyStores;
 
-      // 緯度経度の有無をチェック
-      const withLocation = menuData.filter(item => item.latitude && item.longitude);
-      const withoutLocation = menuData.filter(item => !item.latitude || !item.longitude);
-      console.log(`[GoogleMap] 緯度経度あり: ${withLocation.length}件, 緯度経度なし: ${withoutLocation.length}件`);
-      if (withoutLocation.length > 0) {
-        console.log('[GoogleMap] 緯度経度なしサンプル:', withoutLocation.slice(0, 3).map(item => ({
-          shop: item.shop,
-          menu: item.menu,
-          latitude: item.latitude,
-          longitude: item.longitude
-        })));
-      }
+      let shops = [];
+      let center = { lat: 35.7080, lng: 139.7731 }; // デフォルト: 上野広小路交差点
 
-      // 店舗ごとにグループ化（緯度経度がある店舗のみ）
-      const shopLocations = {};
-      menuData.forEach(item => {
-        if (item.latitude && item.longitude && item.shop) {
-          if (!shopLocations[item.shop]) {
-            shopLocations[item.shop] = {
-              shop: item.shop,
-              genre: item.genre || '未分類',
-              latitude: item.latitude,
-              longitude: item.longitude,
-              menuCount: 0,
-            };
-          }
-          shopLocations[item.shop].menuCount++;
+      if (isLoadingMode) {
+        // ローディング画面モード: nearbyStoresをそのまま使用
+        console.log('[GoogleMap] ローディングモード: userLocation + nearbyStores');
+        console.log('[GoogleMap] userLocation:', userLocation);
+        console.log('[GoogleMap] nearbyStores件数:', nearbyStores.length);
+
+        center = { lat: userLocation.lat, lng: userLocation.lng };
+        shops = nearbyStores.map(store => ({
+          shop: store.name,
+          chainId: store.chainId,
+          latitude: store.lat,
+          longitude: store.lng,
+          distance: store.distance,
+          address: store.address,
+          genre: '未分類', // Places APIからはジャンル情報が取得できないため
+          menuCount: 0,
+        }));
+      } else if (menuData && menuData.length > 0) {
+        // メニュー表示モード: menuDataから店舗をグループ化
+        console.log('[GoogleMap] メニュー表示モード: menuData');
+        console.log('[GoogleMap] menuData件数:', menuData.length);
+        console.log('[GoogleMap] menuDataサンプル:', menuData.slice(0, 2));
+
+        // 緯度経度の有無をチェック
+        const withLocation = menuData.filter(item => item.latitude && item.longitude);
+        const withoutLocation = menuData.filter(item => !item.latitude || !item.longitude);
+        console.log(`[GoogleMap] 緯度経度あり: ${withLocation.length}件, 緯度経度なし: ${withoutLocation.length}件`);
+        if (withoutLocation.length > 0) {
+          console.log('[GoogleMap] 緯度経度なしサンプル:', withoutLocation.slice(0, 3).map(item => ({
+            shop: item.shop,
+            menu: item.menu,
+            latitude: item.latitude,
+            longitude: item.longitude
+          })));
         }
-      });
 
-      const shops = Object.values(shopLocations);
-      const center = { lat: 35.7080, lng: 139.7731 }; // 上野広小路交差点
+        // 店舗ごとにグループ化（緯度経度がある店舗のみ）
+        const shopLocations = {};
+        menuData.forEach(item => {
+          if (item.latitude && item.longitude && item.shop) {
+            if (!shopLocations[item.shop]) {
+              shopLocations[item.shop] = {
+                shop: item.shop,
+                genre: item.genre || '未分類',
+                latitude: item.latitude,
+                longitude: item.longitude,
+                menuCount: 0,
+              };
+            }
+            shopLocations[item.shop].menuCount++;
+          }
+        });
+
+        shops = Object.values(shopLocations);
+      } else {
+        // データがない場合はデフォルトの中心点のみ表示
+        console.log('[GoogleMap] データなし、デフォルト表示');
+      }
 
       console.log('[GoogleMap] 地図に表示する店舗数:', shops.length);
       console.log('[GoogleMap] サンプル店舗:', shops.slice(0, 3));
@@ -255,7 +284,33 @@ export default function GoogleMap({ menuData, onShopClick, highlightedShop, onSh
           zIndex: 1,
         });
 
-        // この店舗のメニューリストを取得
+        // ローディングモードの場合は簡易的な情報ウィンドウを表示
+        if (isLoadingMode) {
+          const infoWindow = new window.google.maps.InfoWindow({
+            content: `
+              <div style="
+                padding: 12px 16px;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+              ">
+                <h3 style="font-size: 14px; font-weight: 700; margin: 0 0 6px 0; color: #111827;">${shop.shop}</h3>
+                <div style="font-size: 12px; color: #6b7280;">
+                  <div style="margin-bottom: 4px;">📍 ${shop.distance}m</div>
+                  ${shop.address ? `<div style="font-size: 11px; color: #9ca3af;">${shop.address}</div>` : ''}
+                </div>
+              </div>
+            `,
+          });
+
+          marker.addListener('click', () => {
+            markersRef.current.forEach(m => m.infoWindow.close());
+            infoWindow.open(map, marker);
+          });
+
+          markersRef.current.push({ marker, infoWindow, shopName: shop.shop });
+          return; // ローディングモードではここで終了
+        }
+
+        // 通常モード: この店舗のメニューリストを取得
         const shopMenus = menuData.filter(item => item.shop === shop.shop);
 
         // メニューリストのHTMLを生成
@@ -419,7 +474,7 @@ export default function GoogleMap({ menuData, onShopClick, highlightedShop, onSh
       markersRef.current = [];
       delete window.handleShopClick;
     };
-  }, [menuData, onShopClick]);
+  }, [menuData, userLocation, nearbyStores, onShopClick]);
 
   // ローディング時の点滅アニメーション（各ピンがバラバラに点滅）
   useEffect(() => {

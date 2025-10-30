@@ -44,86 +44,112 @@ export async function GET(request) {
   try {
     const db = getFirebaseAdmin();
 
-    // クエリパラメータから classification を取得
+    // クエリパラメータを取得
     const { searchParams } = new URL(request.url);
     const classification = searchParams.get('classification');
+    const chainsParam = searchParams.get('chains'); // カンマ区切りのchainId
 
-    console.log('[Firestore Query]', { classification: classification || 'all' });
-
-    // 2つのコレクションからデータを取得
-    const collections = ['menuItemsHirokojiClass', 'menuItemsHirokojiUnofficial'];
-    const allMenus = [];
-
-    for (const collectionName of collections) {
-      let query = db.collection(collectionName);
-
-      // classificationが指定されていればフィルタリング
-      if (classification) {
-        query = query.where('classification', '==', classification);
-      }
-
-      const snapshot = await query.get();
-      console.log(`[Firestore] ${collectionName}: ${snapshot.docs.length} documents`);
-
-      // Firestoreデータをフロントエンド互換形式に変換
-      const menus = snapshot.docs.map(doc => {
-        const data = doc.data();
-
-        return {
-          // 既存フロントエンド互換キー
-          shop: data.restaurantName || '',
-          category: data.category || '',
-          menu: data.menuName || '',
-          calories: data.nutrition?.calories || 0,
-          protein: data.nutrition?.protein || 0,
-          fat: data.nutrition?.fat || 0,
-          carbs: data.nutrition?.carbs || 0,
-          salt: data.nutrition?.salt || 0,
-
-          // 新規追加フィールド
-          genre: data.genre || '',
-          classification: data.classification || '',
-          price: data.price || 0,
-
-          // 位置情報（GeoPoint型の場合）
-          latitude: data.location?._latitude || data.latitude || null,
-          longitude: data.location?._longitude || data.longitude || null,
-
-          // 内部用
-          id: doc.id,
-          source: collectionName, // どのコレクションから取得したかを記録
-
-          // サイズは固定値（後で必要に応じて調整）
-          size: '-',
-        };
-      });
-
-      allMenus.push(...menus);
-    }
-
-    if (allMenus.length === 0) {
-      console.log('No menu items found in Firestore');
-      return NextResponse.json([], { status: 200 });
-    }
-
-    // 除外フィルター（既存ロジックを維持）
-    const excludeKeywords = [
-      '調味料','ドリンク','飲み物','ソース','タレ','飲料','ジュース','コーヒー','お茶','水',
-      'ケチャップ','マスタード','マヨネーズ','醤油','味噌','塩','胡椒','スパイス','香辛料'
-    ];
-
-    const filteredMenus = allMenus.filter(m => {
-      const menuName = (m.menu || '').toLowerCase();
-      return !excludeKeywords.some(k => menuName.includes(k.toLowerCase()));
+    console.log('[Firestore Query]', {
+      classification: classification || 'all',
+      chains: chainsParam || 'all'
     });
 
-    console.log(`[Firestore] Fetched ${filteredMenus.length} menu items from ${collections.length} collections (classification: ${classification || 'all'})`);
+    // 全てmenuItemsコレクションを使用（44チェーン、8500メニュー）
 
-    return NextResponse.json(filteredMenus, {
+    // chainIdsが指定されている場合は絞り込み、なければ全て取得
+    let query = db.collection('menuItems');
+
+    if (chainsParam) {
+      const chainIds = chainsParam.split(',').filter(c => c);
+
+      if (chainIds.length === 0) {
+        return NextResponse.json([], { status: 200 });
+      }
+
+      // Firestore制限: 10個まで
+      query = query.where('chainId', 'in', chainIds.slice(0, 10));
+    }
+
+    const snapshot = await query.get();
+    console.log(`[Firestore] menuItems: ${snapshot.docs.length} documents (chains: ${chainsParam || 'all'})`);
+
+    const menus = snapshot.docs.map(doc => {
+      const data = doc.data();
+
+      return {
+        // フロントエンド互換キー
+        shop: data.restaurantName || '',
+        category: data.category || '',
+        menu: data.menuName || '',
+        calories: data.nutrition?.calories || 0,
+        protein: data.nutrition?.protein || 0,
+        fat: data.nutrition?.fat || 0,
+        carbs: data.nutrition?.carbs || 0,
+        salt: data.nutrition?.salt || 0,
+
+        genre: data.genre || '',
+        classification: data.classification || '',
+        price: data.price || 0,
+
+        id: doc.id,
+        source: 'menuItems',
+        size: '-',
+        chainId: data.chainId || '', // Add chainId for location-based filtering
+      };
+    });
+
+    // 除外フィルター（サイドメニュー、トッピング、ドリンク等）
+    const excludeKeywords = [
+      // ドリンク・飲み物
+      '調味料','ドリンク','飲み物','ソース','タレ','飲料','ジュース','コーヒー','お茶','水',
+      'ケチャップ','マスタード','マヨネーズ','醤油','味噌','塩','胡椒','スパイス','香辛料',
+
+      // サイドメニュー
+      'サイド','トッピング','単品','追加','オプション',
+
+      // 小さいメニュー（昼食に不適切）
+      'スナック','おやつ','デザート','アイス','シェイク','フロート',
+      'ポテト','フライ','ナゲット','チキンナゲット','サラダ','スープ',
+      'コーンスープ','みそ汁','味噌汁','漬物','キムチ','のり','海苔',
+      '生卵','卵','たまご','温泉卵','半熟卵','ゆで卵',
+      'チーズ','バター','マーガリン','ジャム','はちみつ','蜂蜜',
+
+      // トッピング
+      'トッピング','増量','大盛','特盛','メガ盛','追加チーズ','追加肉',
+      '具材追加','具追加','ライス大盛','ごはん大盛',
+
+      // その他
+      'ドリンクバー','セットドリンク','お子様','キッズ'
+    ];
+
+    const filteredMenus = menus.filter(m => {
+      const menuName = (m.menu || '').toLowerCase();
+      const category = (m.category || '').toLowerCase();
+
+      // メニュー名またはカテゴリに除外キーワードが含まれていたら除外
+      const hasExcludeKeyword = excludeKeywords.some(k =>
+        menuName.includes(k.toLowerCase()) || category.includes(k.toLowerCase())
+      );
+
+      // 昼食として不適切な小さすぎるメニューを除外（カロリー200kcal未満）
+      const isTooSmall = m.calories < 200;
+
+      return !hasExcludeKeyword && !isTooSmall;
+    });
+
+    // タンパク質効率スコアでソート
+    const scored = filteredMenus.map(m => ({
+      ...m,
+      score: m.calories > 0 ? (m.protein / m.calories) * 1000 : 0
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+
+    console.log(`[Firestore] 返却: ${Math.min(scored.length, 10)} メニュー`);
+
+    return NextResponse.json(scored.slice(0, 10), {
       status: 200,
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
-      },
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
 
   } catch (error) {

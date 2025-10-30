@@ -1,6 +1,5 @@
 import { Inter, Noto_Serif_JP } from "next/font/google";
 import "./globals.css";
-import "./styles/mobile.css";
 
 const inter = Inter({
   variable: "--font-geist-sans",

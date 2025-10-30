@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
+    "dev:https": "next dev -H 0.0.0.0 & local-ssl-proxy --source 3001 --target 3000 --cert .cert/cert.pem --key .cert/key.pem --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
