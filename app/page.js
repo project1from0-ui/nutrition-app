@@ -379,13 +379,16 @@ export default function Page() {
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'terms'|'profile'|'mode-select'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'
+  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'logo-zoom'|'terms'|'profile'|'mode-select'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'
   const [mode, setMode] = useState(''); // 'slim'|'keep'|'bulk'
   const [isClient, setIsClient] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [showMenu, setShowMenu] = useState(false);
   const [showTargetSettings, setShowTargetSettings] = useState(false);
   const [selectedStore, setSelectedStore] = useState(null); // 経路案内用の選択された店舗
+  const [showModeDescription, setShowModeDescription] = useState(null); // 'slim'|'keep'|'bulk'|null
+  const [isLongPress, setIsLongPress] = useState(false); // 長押しフラグ
+  const [logoZoomStep, setLogoZoomStep] = useState(1); // 黒画面のステップ (1: 最初の説明, 2: 2つ目の説明)
 
   // 位置情報
   const [allowLocation, setAllowLocation] = useState(true);
@@ -441,7 +444,15 @@ export default function Page() {
     }
   }, [currentSection, isClient]);
 
-  const handleLogin = () => { setShowProfileForm(true); setCurrentSection('profile'); };
+  const [isZooming, setIsZooming] = useState(false);
+
+  const handleLogin = () => {
+    setIsZooming(true);
+    setTimeout(() => {
+      setCurrentSection('logo-zoom');
+      setIsZooming(false);
+    }, 1000);
+  };
 
 
   const handleSearch = async () => {
@@ -609,9 +620,9 @@ export default function Page() {
           clearInterval(progressInterval);
           return 90;
         }
-        return prev + 5;
+        return prev + 1;
       });
-    }, 300);
+    }, 67);
 
     // メニュー取得
     const result = await fetchMenuData(classificationName);
@@ -620,14 +631,30 @@ export default function Page() {
     setUserLocation(result.userLocation || null);
     requestLocationIfAllowed();
 
-    // 100%完了
-    setLoadingProgress(100);
-    clearInterval(progressInterval);
-
-    // 少し待ってから画面遷移
-    setTimeout(() => {
-      setCurrentSection('shop-select');
-    }, 500);
+    // データ取得完了後、プログレスバーが90%以上になるまで待つ
+    const waitForProgress = setInterval(() => {
+      setLoadingProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(waitForProgress);
+          clearInterval(progressInterval);
+          // 90%から100%まで滑らかにアニメーション
+          let current = 90;
+          const finalInterval = setInterval(() => {
+            current += 1;
+            setLoadingProgress(current);
+            if (current >= 100) {
+              clearInterval(finalInterval);
+              // 少し待ってから画面遷移
+              setTimeout(() => {
+                setCurrentSection('shop-select');
+              }, 500);
+            }
+          }, 67);
+          return prev;
+        }
+        return prev;
+      });
+    }, 100);
   };
 
   /* ============ 判定・整形（核心） ============ */
@@ -720,32 +747,45 @@ export default function Page() {
 
   const styles = {
     container: {
-      minHeight: '100vh',
-      background: 'transparent',
-      padding: 20,
-      fontFamily: 'system-ui, -apple-system, sans-serif'
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      width: '100vw',
+      height: '100vh',
+      background: 'white',
+      padding: 0,
+      margin: 0,
+      overflow: 'auto',
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      boxSizing: 'border-box'
     },
     card: {
-      maxWidth: 800,
-      margin: '40px auto',
+      width: '100%',
+      height: '100%',
+      margin: 0,
       background: 'white',
-      borderRadius: 20,
-      padding: 40,
-      boxShadow: '0 20px 60px rgba(0,0,0,0.1)',
-      position: 'relative'
+      borderRadius: 0,
+      padding: 20,
+      boxShadow: 'none',
+      position: 'relative',
+      minHeight: '100vh',
+      boxSizing: 'border-box'
     },
-    title: { fontSize: 32, textAlign: 'center', marginBottom: 20, color: '#333' },
+    title: { fontSize: 48, textAlign: 'center', marginBottom: 20, color: '#333' },
     button: {
       display: 'block', width: '100%', maxWidth: 300, margin: '20px auto', padding: '15px 30px',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white', border: 'none', borderRadius: 10, fontSize: 16, cursor: 'pointer'
+      background: '#000',
+      color: 'white', border: 'none', borderRadius: 10, fontSize: 16, cursor: 'pointer',
+      transition: 'background 0.2s ease'
     },
     input: { width: '100%', padding: 12, marginBottom: 15, border: '2px solid #e0e0e0', borderRadius: 8, fontSize: 16 },
     pill: (active) => ({
       padding: '6px 10px', borderRadius: 999,
-      border: `1px solid ${active ? '#667eea' : '#e5e7eb'}`,
-      background: active ? '#eef2ff' : '#fff',
-      color: active ? '#4338ca' : '#374151',
+      border: `1px solid ${active ? '#333' : '#e5e7eb'}`,
+      background: active ? '#f5f5f5' : '#fff',
+      color: active ? '#000' : '#374151',
       fontSize: 12, fontWeight: 700, cursor: 'pointer'
     }),
     aiEvalCard: {
@@ -807,11 +847,166 @@ export default function Page() {
     <div className="container" style={styles.container}>
       {/* ログイン */}
       {currentSection === 'login' && (
-        <div style={styles.card}>
-          <p style={{ textAlign:'center', color:'#667eea', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>外食チェーンAI Agent</p>
-          <img src="/logo.png" alt="BULK" style={{ width: '100%', maxWidth: 400, margin: '0 auto 8px', display: 'block' }} />
-          <p style={{ textAlign:'center', color:'#666', marginBottom: 30 }}>最適な食事を一瞬で見つけよう</p>
-          <button style={styles.button} onClick={handleLogin}>Start</button>
+        <div
+          onClick={handleLogin}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'white',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+            padding: '0 20px'
+          }}
+        >
+          <img
+            src="/logo.png"
+            alt="BULK"
+            style={{
+              width: '100%',
+              maxWidth: 400,
+              marginBottom: 0,
+              display: 'block'
+            }}
+          />
+          <p style={{
+            textAlign: 'center',
+            color: '#666',
+            fontSize: 16,
+            margin: 0,
+            padding: 0,
+            marginTop: -120,
+            marginBottom: 0
+          }}>
+            最適な食事を一瞬で見つけよう
+          </p>
+          <p style={{
+            textAlign: 'center',
+            color: '#666',
+            fontSize: 16,
+            marginTop: 100,
+            animation: 'blink 1.5s ease-in-out infinite'
+          }}>
+            画面をタップ
+          </p>
+          <style jsx>{`
+            @keyframes blink {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.3; }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* ロゴズーム画面 */}
+      {currentSection === 'logo-zoom' && (
+        <div
+          onClick={() => {
+            if (logoZoomStep === 1) {
+              setLogoZoomStep(2);
+            } else {
+              setShowProfileForm(true);
+              setCurrentSection('profile');
+              setLogoZoomStep(1); // リセット
+            }
+          }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'black',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            padding: '0 40px',
+            margin: 0,
+            animation: 'fadeIn 0.5s ease-in-out',
+            boxSizing: 'border-box',
+            overflow: 'hidden'
+          }}
+        >
+          <p style={{
+            color: 'white',
+            fontSize: 27,
+            lineHeight: 1.8,
+            textAlign: 'left',
+            animation: logoZoomStep === 2 ? 'fadeInText 1.5s ease-out' : 'fadeInText 1.5s ease-out',
+            margin: 0,
+            padding: 0,
+            whiteSpace: 'pre-line',
+            key: logoZoomStep
+          }}>
+            {logoZoomStep === 1 ? `BULKは、
+あなたの代わりに、
+最適な食事を決めてくれる
+AIエージェントです。` : `全国30,000店以上の
+栄養データベースから、
+
+今、あなたに最適な
+一品を一瞬で
+解析します。`}
+          </p>
+          <p style={{
+            position: 'absolute',
+            bottom: '100px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            textAlign: 'center',
+            color: '#999',
+            fontSize: 16,
+            animation: 'blinkText 1.5s ease-in-out infinite',
+            margin: 0
+          }}>
+            画面をタップして次へ
+          </p>
+          <style jsx>{`
+            @keyframes fadeIn {
+              from { opacity: 0; }
+              to { opacity: 1; }
+            }
+            @keyframes zoomIn {
+              from {
+                transform: scale(0.3);
+                opacity: 0;
+              }
+              to {
+                transform: scale(1);
+                opacity: 1;
+              }
+            }
+            @keyframes fadeInText {
+              0% {
+                opacity: 0;
+                transform: translateY(20px);
+              }
+              50% {
+                opacity: 0;
+              }
+              100% {
+                opacity: 1;
+                transform: translateY(0);
+              }
+            }
+            @keyframes blinkText {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.3; }
+            }
+          `}</style>
         </div>
       )}
 
@@ -819,100 +1014,297 @@ export default function Page() {
       {currentSection === 'mode-select' && (
         <div style={styles.card}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={{ ...styles.title, marginBottom: 40 }}>Mode</h1>
+          <h1 style={{ ...styles.title, marginBottom: 20 }}>MODE</h1>
 
-          {/* メインモードボタン（3つ） */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 20 }}>
+          {/* ヒント */}
+          <p style={{ textAlign: 'center', fontSize: 14, color: '#666', marginBottom: 30 }}>
+            各モードを長押しで詳細を確認できます
+          </p>
+
+          {/* 3つのモードボタン */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginBottom: 20 }}>
             <button
-              onClick={() => { setMode('slim'); setCurrentSection('home'); }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                setShowModeDescription(null);
+                e.currentTarget.dataset.startTime = Date.now();
+                const timer = setTimeout(() => {
+                  setShowModeDescription('slim');
+                }, 500);
+                e.currentTarget.dataset.timer = timer;
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                clearTimeout(e.currentTarget.dataset.timer);
+                const duration = Date.now() - (parseInt(e.currentTarget.dataset.startTime) || 0);
+
+                setShowModeDescription(null);
+
+                // 短いタップ（500ms未満）の場合のみモード選択
+                if (duration < 500) {
+                  setMode('slim');
+                  setCurrentSection('home');
+                }
+              }}
+              onTouchCancel={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
+              onMouseDown={(e) => {
+                setIsLongPress(false);
+                const timer = setTimeout(() => {
+                  setIsLongPress(true);
+                  setShowModeDescription('slim');
+                }, 500);
+                e.target.dataset.timer = timer;
+              }}
+              onMouseUp={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                // 長押しだった場合はフラグをリセット（次回のために）
+                setTimeout(() => setIsLongPress(false), 100);
+              }}
+              onMouseLeave={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
               style={{
-                padding: '24px 32px',
-                background: mode === 'slim' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
-                color: mode === 'slim' ? 'white' : '#667eea',
-                border: `2px solid ${mode === 'slim' ? 'transparent' : '#667eea'}`,
+                padding: '32px 40px',
+                background: mode === 'slim' ? '#000' : 'white',
+                color: mode === 'slim' ? 'white' : '#333',
+                border: `2px solid ${mode === 'slim' ? '#000' : '#e0e0e0'}`,
                 borderRadius: 12,
-                fontSize: 20,
+                fontSize: 32,
                 fontWeight: 700,
                 cursor: 'pointer',
                 boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none'
               }}
               onMouseEnter={e => {
                 if (mode !== 'slim') {
-                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.background = '#000';
                   e.target.style.color = 'white';
+                  e.target.style.borderColor = '#000';
                 }
               }}
               onMouseLeave={e => {
                 if (mode !== 'slim') {
                   e.target.style.background = 'white';
-                  e.target.style.color = '#667eea';
+                  e.target.style.color = '#333';
+                  e.target.style.borderColor = '#e0e0e0';
                 }
               }}
             >
-              SLIM（痩せたい）
+              SLIM
             </button>
 
             <button
-              onClick={() => { setMode('keep'); setCurrentSection('home'); }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                setShowModeDescription(null);
+                e.currentTarget.dataset.startTime = Date.now();
+                const timer = setTimeout(() => {
+                  setShowModeDescription('keep');
+                }, 500);
+                e.currentTarget.dataset.timer = timer;
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                clearTimeout(e.currentTarget.dataset.timer);
+                const duration = Date.now() - (parseInt(e.currentTarget.dataset.startTime) || 0);
+
+                setShowModeDescription(null);
+
+                // 短いタップ（500ms未満）の場合のみモード選択
+                if (duration < 500) {
+                  setMode('keep');
+                  setCurrentSection('home');
+                }
+              }}
+              onTouchCancel={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
+              onMouseDown={(e) => {
+                setIsLongPress(false);
+                const timer = setTimeout(() => {
+                  setIsLongPress(true);
+                  setShowModeDescription('keep');
+                }, 500);
+                e.target.dataset.timer = timer;
+              }}
+              onMouseUp={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                // 長押しだった場合はフラグをリセット（次回のために）
+                setTimeout(() => setIsLongPress(false), 100);
+              }}
+              onMouseLeave={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
               style={{
-                padding: '24px 32px',
-                background: mode === 'keep' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
-                color: mode === 'keep' ? 'white' : '#667eea',
-                border: `2px solid ${mode === 'keep' ? 'transparent' : '#667eea'}`,
+                padding: '32px 40px',
+                background: mode === 'keep' ? '#000' : 'white',
+                color: mode === 'keep' ? 'white' : '#333',
+                border: `2px solid ${mode === 'keep' ? '#000' : '#e0e0e0'}`,
                 borderRadius: 12,
-                fontSize: 20,
+                fontSize: 32,
                 fontWeight: 700,
                 cursor: 'pointer',
                 boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none'
               }}
               onMouseEnter={e => {
                 if (mode !== 'keep') {
-                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.background = '#000';
                   e.target.style.color = 'white';
+                  e.target.style.borderColor = '#000';
                 }
               }}
               onMouseLeave={e => {
                 if (mode !== 'keep') {
                   e.target.style.background = 'white';
-                  e.target.style.color = '#667eea';
+                  e.target.style.color = '#333';
+                  e.target.style.borderColor = '#e0e0e0';
                 }
               }}
             >
-              KEEP（体型を維持したい）
+              KEEP
             </button>
 
             <button
-              onClick={() => { setMode('bulk'); setCurrentSection('home'); }}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                setShowModeDescription(null);
+                e.currentTarget.dataset.startTime = Date.now();
+                const timer = setTimeout(() => {
+                  setShowModeDescription('bulk');
+                }, 500);
+                e.currentTarget.dataset.timer = timer;
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                clearTimeout(e.currentTarget.dataset.timer);
+                const duration = Date.now() - (parseInt(e.currentTarget.dataset.startTime) || 0);
+
+                setShowModeDescription(null);
+
+                // 短いタップ（500ms未満）の場合のみモード選択
+                if (duration < 500) {
+                  setMode('bulk');
+                  setCurrentSection('home');
+                }
+              }}
+              onTouchCancel={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
+              onMouseDown={(e) => {
+                setIsLongPress(false);
+                const timer = setTimeout(() => {
+                  setIsLongPress(true);
+                  setShowModeDescription('bulk');
+                }, 500);
+                e.target.dataset.timer = timer;
+              }}
+              onMouseUp={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                // 長押しだった場合はフラグをリセット（次回のために）
+                setTimeout(() => setIsLongPress(false), 100);
+              }}
+              onMouseLeave={(e) => {
+                clearTimeout(e.target.dataset.timer);
+                setShowModeDescription(null);
+                setIsLongPress(false);
+              }}
               style={{
-                padding: '24px 32px',
-                background: mode === 'bulk' ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white',
-                color: mode === 'bulk' ? 'white' : '#667eea',
-                border: `2px solid ${mode === 'bulk' ? 'transparent' : '#667eea'}`,
+                padding: '32px 40px',
+                background: mode === 'bulk' ? '#000' : 'white',
+                color: mode === 'bulk' ? 'white' : '#333',
+                border: `2px solid ${mode === 'bulk' ? '#000' : '#e0e0e0'}`,
                 borderRadius: 12,
-                fontSize: 20,
+                fontSize: 32,
                 fontWeight: 700,
                 cursor: 'pointer',
                 boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none'
               }}
               onMouseEnter={e => {
                 if (mode !== 'bulk') {
-                  e.target.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                  e.target.style.background = '#000';
                   e.target.style.color = 'white';
+                  e.target.style.borderColor = '#000';
                 }
               }}
               onMouseLeave={e => {
                 if (mode !== 'bulk') {
                   e.target.style.background = 'white';
-                  e.target.style.color = '#667eea';
+                  e.target.style.color = '#333';
+                  e.target.style.borderColor = '#e0e0e0';
                 }
               }}
             >
-              BULK（筋肉を付けたい）
+              BULK
             </button>
           </div>
+
+          {/* モード説明モーダル */}
+          {showModeDescription && (
+            <div
+              style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'rgba(0, 0, 0, 0.7)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 9999,
+                padding: 20,
+                pointerEvents: 'none'
+              }}
+            >
+              <div
+                style={{
+                  background: 'white',
+                  borderRadius: 16,
+                  padding: 32,
+                  maxWidth: 500,
+                  width: '100%',
+                  boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)'
+                }}
+              >
+                <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 20, color: '#333', textAlign: 'center' }}>
+                  {showModeDescription === 'slim' && 'SLIM'}
+                  {showModeDescription === 'keep' && 'KEEP'}
+                  {showModeDescription === 'bulk' && 'BULK'}
+                </h2>
+                <p style={{ fontSize: 16, lineHeight: 1.8, color: '#666', marginBottom: 0 }}>
+                  {showModeDescription === 'slim' && '体重を減らしたい方向けのモードです。低カロリーで高タンパク質なメニューを優先的に提案します。健康的に体脂肪を落としながら、筋肉を維持することを目指します。'}
+                  {showModeDescription === 'keep' && '現在の体型を維持したい方向けのモードです。バランスの良い栄養素のメニューを提案します。日常的な健康管理に最適で、無理なく継続できる食事プランをサポートします。'}
+                  {showModeDescription === 'bulk' && '筋肉を増やしたい方向けのモードです。高タンパク質で適度なカロリーのメニューを優先的に提案します。効率的に筋肉量を増やすことを目指します。'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -929,7 +1321,7 @@ export default function Page() {
               width: 40,
               height: 40,
               background: 'white',
-              border: '2px solid #667eea',
+              border: '2px solid #000',
               borderRadius: 8,
               cursor: 'pointer',
               display: 'flex',
@@ -943,7 +1335,7 @@ export default function Page() {
               transition: 'all 0.2s ease'
             }}
             onMouseEnter={e => {
-              e.target.style.background = '#667eea';
+              e.target.style.background = '#000';
               Array.from(e.target.children).forEach(child => child.style.background = 'white');
             }}
             onMouseLeave={e => {
@@ -951,9 +1343,9 @@ export default function Page() {
               Array.from(e.target.children).forEach(child => child.style.background = '#667eea');
             }}
           >
-            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
-            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
-            <div style={{ width: 20, height: 2, background: '#667eea', transition: 'all 0.2s ease' }}></div>
+            <div style={{ width: 20, height: 2, background: '#000', transition: 'all 0.2s ease' }}></div>
+            <div style={{ width: 20, height: 2, background: '#000', transition: 'all 0.2s ease' }}></div>
+            <div style={{ width: 20, height: 2, background: '#000', transition: 'all 0.2s ease' }}></div>
           </button>
 
           {/* メニューパネル */}
@@ -964,7 +1356,7 @@ export default function Page() {
               right: 20,
               width: 250,
               background: 'white',
-              border: '2px solid #667eea',
+              border: '2px solid #000',
               borderRadius: 12,
               boxShadow: '0 4px 16px rgba(0, 0, 0, 0.15)',
               zIndex: 999,
@@ -991,7 +1383,7 @@ export default function Page() {
                   onMouseEnter={e => e.target.style.background = '#f3f4f6'}
                   onMouseLeave={e => e.target.style.background = 'transparent'}
                 >
-                  Mode設定
+                  MODE変更
                 </button>
                 <button
                   onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); setShowMenu(false); }}
@@ -1010,7 +1402,7 @@ export default function Page() {
                   onMouseEnter={e => e.target.style.background = '#f3f4f6'}
                   onMouseLeave={e => e.target.style.background = 'transparent'}
                 >
-                  プロフィール編集
+                  編集
                 </button>
               </div>
             </div>
@@ -1019,28 +1411,43 @@ export default function Page() {
           {/* 選択されたMode表示 */}
           {mode && (
             <div style={{
+              width: '100%',
               textAlign: 'center',
-              marginBottom: 30
+              marginBottom: 30,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'flex-end',
+              gap: 4
             }}>
               <span style={{
                 fontSize: 32,
                 fontWeight: 800,
-                color: '#111827'
+                color: '#111827',
+                lineHeight: 1
               }}>
                 {mode === 'slim' && 'SLIM'}
                 {mode === 'keep' && 'KEEP'}
                 {mode === 'bulk' && 'BULK'}
                 {mode === 'other' && 'OTHER'}
               </span>
+              <span style={{
+                fontSize: 12,
+                fontWeight: 400,
+                color: '#6b7280',
+                lineHeight: 1,
+                paddingBottom: 2
+              }}>
+                mode
+              </span>
             </div>
           )}
 
           {/* メインアクションカード */}
           <div style={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: '#000',
             borderRadius: 16,
             padding: 32,
-            boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
             color: 'white',
             textAlign: 'center'
           }}>
@@ -1074,7 +1481,7 @@ export default function Page() {
                 width: 120,
                 height: 120,
                 background: 'white',
-                color: '#667eea',
+                color: '#000',
                 border: 'none',
                 borderRadius: '50%',
                 fontSize: 18,
@@ -1096,9 +1503,15 @@ export default function Page() {
                 e.target.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
               }}
             >
-              Search
+              <span style={{ animation: 'blinkSearch 1.5s ease-in-out infinite' }}>Search</span>
             </button>
           </div>
+          <style jsx>{`
+            @keyframes blinkSearch {
+              0%, 100% { opacity: 1; }
+              50% { opacity: 0.3; }
+            }
+          `}</style>
         </div>
       )}
 
@@ -1135,46 +1548,85 @@ export default function Page() {
 
       {/* ローディング画面 */}
       {currentSection === 'loading' && (
-        <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
-          <h1 style={{ ...styles.title, marginBottom: 20 }}>半径200m圏内で</h1>
-          <h1 style={{ ...styles.title, marginTop: 0, marginBottom: 40 }}>あなたに最適なメニューを解析中</h1>
-
-          {/* プログレスバー */}
+        <div style={{
+          ...styles.card,
+          maxWidth: '100%',
+          padding: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh'
+        }}>
           <div style={{
-            width: '100%',
-            maxWidth: 400,
-            height: 8,
-            background: '#e5e7eb',
-            borderRadius: 999,
-            overflow: 'hidden',
-            margin: '0 auto 20px'
+            position: 'relative',
+            width: 280,
+            height: 280,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
           }}>
-            <div style={{
-              width: `${loadingProgress}%`,
+            {/* 円形プログレスバー */}
+            <svg style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
               height: '100%',
-              background: 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)',
-              transition: 'width 0.5s ease-out',
-              borderRadius: 999
-            }} />
+              transform: 'rotate(-90deg)'
+            }}>
+              {/* 背景の円 */}
+              <circle
+                cx="140"
+                cy="140"
+                r="120"
+                fill="none"
+                stroke="#e5e7eb"
+                strokeWidth="8"
+              />
+              {/* プログレスの円 */}
+              <circle
+                cx="140"
+                cy="140"
+                r="120"
+                fill="none"
+                stroke="#000"
+                strokeWidth="8"
+                strokeDasharray={`${2 * Math.PI * 120}`}
+                strokeDashoffset={`${2 * Math.PI * 120 * (1 - loadingProgress / 100)}`}
+                strokeLinecap="round"
+                style={{
+                  transition: 'stroke-dashoffset 0.067s linear'
+                }}
+              />
+            </svg>
+
+            {/* 中央のテキスト */}
+            <div style={{
+              textAlign: 'center',
+              zIndex: 1,
+              padding: '0 30px'
+            }}>
+              <h2 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: '#333',
+                marginBottom: 8,
+                lineHeight: 1.5
+              }}>
+                半径200m圏内で<br />
+                あなたに最適な<br />
+                メニューを解析中
+              </h2>
+              <p style={{
+                fontSize: 24,
+                fontWeight: 700,
+                color: '#000',
+                margin: 0
+              }}>
+                {loadingProgress}%
+              </p>
+            </div>
           </div>
-
-          {/* パーセンテージ表示 */}
-          <p style={{
-            textAlign: 'center',
-            fontSize: 18,
-            fontWeight: 700,
-            color: '#667eea',
-            marginBottom: 20
-          }}>
-            {loadingProgress}%
-          </p>
-
-          <style jsx>{`
-            @keyframes pulse {
-              0%, 100% { transform: scale(1); opacity: 1; }
-              50% { transform: scale(1.2); opacity: 0.7; }
-            }
-          `}</style>
         </div>
       )}
 
@@ -1182,9 +1634,14 @@ export default function Page() {
 
       {/* プロフィール */}
       {currentSection === 'profile' && showProfileForm && (
-       <div style={styles.card}>
+       <div style={{
+         ...styles.card,
+         overflowY: 'auto',
+         height: '100vh',
+         paddingBottom: 100
+       }}>
          <button onClick={handleBack} style={styles.backButton}>←</button>
-         <h1 style={styles.title}>プロフィール設定</h1>
+         <h1 style={styles.title}>PROFILE</h1>
           
           {/* 生年月日 */}
           <div style={{ marginBottom:20 }}>
@@ -1212,7 +1669,7 @@ export default function Page() {
               {['male','female'].map(g => (
                 <button key={g} type="button" onClick={()=>setGender(g)}
                 style={{
-                    padding:12, border: gender===g ? '2px solid #667eea':'2px solid #e0e0e0',
+                    padding:12, border: gender===g ? '2px solid #000':'2px solid #e0e0e0',
                     borderRadius:8, background: gender===g ? '#f0f4ff':'white',
                     color: gender===g ? '#667eea':'#666', fontWeight: gender===g ? 'bold':'normal', cursor:'pointer'
                   }}
@@ -1304,7 +1761,8 @@ export default function Page() {
           <button onClick={handleSearch}
             style={{ ...styles.button,
               opacity: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||selectedExerciseTypes.length===0||!allowLocation) ? 0.5 : 1,
-              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||selectedExerciseTypes.length===0||!allowLocation) ? 'not-allowed' : 'pointer'
+              cursor: (!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||selectedExerciseTypes.length===0||!allowLocation) ? 'not-allowed' : 'pointer',
+              marginBottom: 40
             }}
             disabled={!birthYear||!birthMonth||!birthDay||!gender||!height||!weight||exerciseFrequency===''||selectedExerciseTypes.length===0||!allowLocation}
           >
@@ -1319,7 +1777,7 @@ export default function Page() {
       {currentSection === 'shop-select' && (
         <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>近隣Top5メニュー</h1>
+          <h1 style={styles.title}>Top5 Menu</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -1394,7 +1852,7 @@ export default function Page() {
                                   onClick={() => handleMenuClick(m)}
                                   style={{
                                     padding:8,
-                                    border: isHighlighted ? '2px solid #667eea' : '1px solid #e5e7eb',
+                                    border: isHighlighted ? '2px solid #000' : '1px solid #e5e7eb',
                                     borderRadius:8,
                                     background: isHighlighted ? '#f0f4ff' : '#fff',
                                     color:'#111827', fontSize:14, fontWeight:700, textAlign:'left', cursor:'pointer',
@@ -1404,7 +1862,7 @@ export default function Page() {
                                     transition: 'all 0.2s ease'
                                   }}
                                   onMouseEnter={e=>{
-                                    e.currentTarget.style.borderColor='#667eea';
+                                    e.currentTarget.style.borderColor='#000';
                                     e.currentTarget.style.borderWidth='2px';
                                     e.currentTarget.style.background='#f0f4ff';
                                     setHighlightedShop(m.shop);
@@ -1420,7 +1878,7 @@ export default function Page() {
                                 >
                                   <div style={{ flex: 1 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                                      <span style={{ fontSize: 16, fontWeight: 800, color: '#667eea' }}>{i + 1}位</span>
+                                      <span style={{ fontSize: 16, fontWeight: 800, color: '#000' }}>{i + 1}位</span>
                                       <span style={{ fontSize: 11, color: '#999', fontWeight: 500 }}>{m.shop || ''}</span>
                                     </div>
                                     <div style={{ fontSize: 14, color: '#111827', fontWeight: 600, paddingLeft: 4 }}>
@@ -1430,10 +1888,10 @@ export default function Page() {
                                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, marginLeft: 8, minWidth: 100 }}>
                                     {storeInfo ? (
                                       <>
-                                        <div style={{ fontSize: 10, color: '#667eea', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                        <div style={{ fontSize: 10, color: '#000', fontWeight: 600, whiteSpace: 'nowrap' }}>
                                           {storeInfo.name}まで
                                         </div>
-                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#667eea', whiteSpace: 'nowrap' }}>
+                                        <div style={{ fontSize: 12, fontWeight: 700, color: '#000', whiteSpace: 'nowrap' }}>
                                           {storeInfo.distance}m
                                         </div>
                                       </>
@@ -1514,7 +1972,7 @@ export default function Page() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, gap: 16 }}>
                   <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
                   {m.latitude && m.longitude && (
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#667eea', whiteSpace: 'nowrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#000', whiteSpace: 'nowrap' }}>
                       {calculateDistance(35.7080, 139.7731, m.latitude, m.longitude)}m
                     </div>
                   )}
@@ -1649,7 +2107,7 @@ export default function Page() {
               }}
               style={{
                 padding: '16px 48px',
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                background: '#000',
                 color: 'white',
                 border: 'none',
                 borderRadius: 12,
