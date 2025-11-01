@@ -140,7 +140,7 @@ async function fetchMenuDataByLocation(classification = null) {
           console.log('[キャッシュ] 店舗情報を復元:', stores.length, '件');
           console.log(`[キャッシュ] ヒット: ${chains.length}チェーン (${Math.floor(age/1000/60)}分前)`);
         }
-      } catch (e) {
+  } catch (e) {
         console.error('[キャッシュ] パースエラー:', e);
       }
     }
@@ -388,7 +388,6 @@ export default function Page() {
   const [selectedStore, setSelectedStore] = useState(null); // 経路案内用の選択された店舗
   const [showModeDescription, setShowModeDescription] = useState(null); // 'slim'|'keep'|'bulk'|null
   const [isLongPress, setIsLongPress] = useState(false); // 長押しフラグ
-  const [logoZoomStep, setLogoZoomStep] = useState(1); // 黒画面のステップ (1: 最初の説明, 2: 2つ目の説明)
 
   // 位置情報
   const [allowLocation, setAllowLocation] = useState(true);
@@ -429,7 +428,7 @@ export default function Page() {
       fetchMenuData().then(result => {
       const data = result.menus || [];
       console.log('[FETCH OK] rows:', data.length);
-      setMenuData(data);
+          setMenuData(data);
       setNearbyStores(result.stores || []);
       setUserLocation(result.userLocation || null);
       if (data.length === 0) alert('データの取得に失敗しました。インターネット接続をご確認ください。');
@@ -620,9 +619,9 @@ export default function Page() {
           clearInterval(progressInterval);
           return 90;
         }
-        return prev + 1;
+        return prev + 2.5;
       });
-    }, 67);
+    }, 300);
 
     // メニュー取得
     const result = await fetchMenuData(classificationName);
@@ -631,30 +630,14 @@ export default function Page() {
     setUserLocation(result.userLocation || null);
     requestLocationIfAllowed();
 
-    // データ取得完了後、プログレスバーが90%以上になるまで待つ
-    const waitForProgress = setInterval(() => {
-      setLoadingProgress(prev => {
-        if (prev >= 90) {
-          clearInterval(waitForProgress);
-          clearInterval(progressInterval);
-          // 90%から100%まで滑らかにアニメーション
-          let current = 90;
-          const finalInterval = setInterval(() => {
-            current += 1;
-            setLoadingProgress(current);
-            if (current >= 100) {
-              clearInterval(finalInterval);
-              // 少し待ってから画面遷移
-              setTimeout(() => {
-                setCurrentSection('shop-select');
-              }, 500);
-            }
-          }, 67);
-          return prev;
-        }
-        return prev;
-      });
-    }, 100);
+    // 100%完了
+    setLoadingProgress(100);
+    clearInterval(progressInterval);
+
+    // 少し待ってから画面遷移
+    setTimeout(() => {
+      setCurrentSection('shop-select');
+    }, 500);
   };
 
   /* ============ 判定・整形（核心） ============ */
@@ -773,7 +756,7 @@ export default function Page() {
       minHeight: '100vh',
       boxSizing: 'border-box'
     },
-    title: { fontSize: 48, textAlign: 'center', marginBottom: 20, color: '#333' },
+    title: { fontSize: 32, textAlign: 'center', marginBottom: 20, color: '#333' },
     button: {
       display: 'block', width: '100%', maxWidth: 300, margin: '20px auto', padding: '15px 30px',
       background: '#000',
@@ -910,15 +893,7 @@ export default function Page() {
       {/* ロゴズーム画面 */}
       {currentSection === 'logo-zoom' && (
         <div
-          onClick={() => {
-            if (logoZoomStep === 1) {
-              setLogoZoomStep(2);
-            } else {
-              setShowProfileForm(true);
-              setCurrentSection('profile');
-              setLogoZoomStep(1); // リセット
-            }
-          }}
+          onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); }}
           style={{
             position: 'fixed',
             top: 0,
@@ -945,21 +920,15 @@ export default function Page() {
             fontSize: 27,
             lineHeight: 1.8,
             textAlign: 'left',
-            animation: logoZoomStep === 2 ? 'fadeInText 1.5s ease-out' : 'fadeInText 1.5s ease-out',
+            animation: 'fadeInText 1.5s ease-out',
             margin: 0,
             padding: 0,
-            whiteSpace: 'pre-line',
-            key: logoZoomStep
+            whiteSpace: 'pre-line'
           }}>
-            {logoZoomStep === 1 ? `BULKは、
+            {`BULKは、
 あなたの代わりに、
 最適な食事を決めてくれる
-AIエージェントです。` : `全国30,000店以上の
-栄養データベースから、
-
-今、あなたに最適な
-一品を一瞬で
-解析します。`}
+AIエージェントです。`}
           </p>
           <p style={{
             position: 'absolute',
@@ -1411,7 +1380,6 @@ AIエージェントです。` : `全国30,000店以上の
           {/* 選択されたMode表示 */}
           {mode && (
             <div style={{
-              width: '100%',
               textAlign: 'center',
               marginBottom: 30,
               display: 'flex',
@@ -1595,7 +1563,7 @@ AIエージェントです。` : `全国30,000店以上の
                 strokeDashoffset={`${2 * Math.PI * 120 * (1 - loadingProgress / 100)}`}
                 strokeLinecap="round"
                 style={{
-                  transition: 'stroke-dashoffset 0.067s linear'
+                  transition: 'stroke-dashoffset 0.5s ease-out'
                 }}
               />
             </svg>
@@ -1777,7 +1745,7 @@ AIエージェントです。` : `全国30,000店以上の
       {currentSection === 'shop-select' && (
         <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>Top5 Menu</h1>
+          <h1 style={styles.title}>Top 10</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -1834,9 +1802,9 @@ AIエージェントです。` : `全国30,000店以上の
                     console.log(`[フィルタリング] ${menuData.length}件 → ${filteredMenuData.length}件（200m圏内のみ）`);
                     console.log('[フィルタリング] フィルタ後のTop3店舗とchainId:', filteredMenuData.slice(0, 3).map(m => `${m.shop} (${m.chainId})`));
 
-                    // フィルタリング後のデータでTop10を計算して上位5件を表示
+                    // フィルタリング後のデータでTop10を計算して上位10件を表示
                     const top10 = buildResults(filteredMenuData, userProfile);
-                    const displayMenus = top10.slice(0, 5);
+                    const displayMenus = top10.slice(0, 10);
 
                       return (
                         <>
@@ -1847,10 +1815,10 @@ AIエージェントです。` : `全国30,000店以上の
                               const storeInfo = findStoreForMenu(m);
 
                               return (
-                                <button
-                                  key={`${m.shop}-${m.menu}-${i}`}
+                      <button
+                        key={`${m.shop}-${m.menu}-${i}`}
                                   onClick={() => handleMenuClick(m)}
-                                  style={{
+                        style={{
                                     padding:8,
                                     border: isHighlighted ? '2px solid #000' : '1px solid #e5e7eb',
                                     borderRadius:8,
@@ -1901,10 +1869,10 @@ AIエージェントです。` : `全国30,000店以上の
                                       </div>
                                     )}
                                   </div>
-                                </button>
+                      </button>
                               );
                             })}
-                          </div>
+                  </div>
                         </>
                       );
                     })()}
@@ -1970,7 +1938,7 @@ AIエージェントです。` : `全国30,000店以上の
                 onMouseLeave={e=>{ e.currentTarget.style.borderColor='#e5e7eb'; e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.04)'; }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, gap: 16 }}>
-                  <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
+                <div className="title" style={{ fontSize:16, fontWeight:'bold', color:'#333', flex:1, marginLeft:32, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.menu}</div>
                   {m.latitude && m.longitude && (
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#000', whiteSpace: 'nowrap' }}>
                       {calculateDistance(35.7080, 139.7731, m.latitude, m.longitude)}m
@@ -1998,7 +1966,7 @@ AIエージェントです。` : `全国30,000店以上の
           </div>
 
           {/* 評価ゲージ削除 */}
-
+              
           {/* 栄養表示 */}
           <div style={{ marginBottom:24 }}>
             <h2 style={{ fontSize:22, fontWeight:800, color:'#111827', marginBottom:16, display:'flex', alignItems:'center', gap:8 }}>
@@ -2015,25 +1983,25 @@ AIエージェントです。` : `全国30,000店以上の
               background: '#f9fafb',
               borderRadius: 12
             }}>
-              {/* エネルギー */}
+                  {/* エネルギー */}
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, fontWeight: 600 }}>エネルギー</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>
                   {selectedMenu.calories}
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginLeft: 2 }}>kcal</span>
-                </div>
-              </div>
+                    </div>
+                  </div>
 
-              {/* たんぱく質 */}
+                  {/* たんぱく質 */}
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, fontWeight: 600 }}>たんぱく質</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>
                   {selectedMenu.protein}
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginLeft: 2 }}>g</span>
                 </div>
-              </div>
+                </div>
 
-              {/* 脂質 */}
+                  {/* 脂質 */}
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, fontWeight: 600 }}>脂質</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>
@@ -2041,16 +2009,16 @@ AIエージェントです。` : `全国30,000店以上の
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginLeft: 2 }}>g</span>
                 </div>
               </div>
-
-              {/* 炭水化物 */}
+              
+                  {/* 炭水化物 */}
               <div style={{ flex: 1, textAlign: 'center' }}>
                 <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, fontWeight: 600 }}>炭水化物</div>
                 <div style={{ fontSize: 20, fontWeight: 800, color: '#111827' }}>
                   {selectedMenu.carbs}
                   <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginLeft: 2 }}>g</span>
-                </div>
-              </div>
-            </div>
+                    </div>
+                    </div>
+                  </div>
           </div>
 
           {/* AI評価削除 */}
@@ -2066,9 +2034,9 @@ AIエージェントです。` : `全国30,000店以上の
                     menuData={[shopData]}
                     onShopClick={() => {}}
                   />
-                </div>
-              );
-            }
+    </div>
+  );
+}
             return null;
           })()}
 
@@ -2105,7 +2073,7 @@ AIエージェントです。` : `全国30,000店以上の
                   console.error('[Google Maps] selectedMenu.chainId:', selectedMenu?.chainId);
                 }
               }}
-              style={{
+            style={{
                 padding: '16px 48px',
                 background: '#000',
                 color: 'white',
@@ -2128,9 +2096,9 @@ AIエージェントです。` : `全国30,000店以上の
             >
               このメニューに決定（経路を表示）
             </button>
-          </div>
-        </div>
-      )}
+                  </div>
+                </div>
+          )}
     </div>
   );
 }
