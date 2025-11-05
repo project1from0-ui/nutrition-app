@@ -54,11 +54,60 @@ export async function GET(request) {
       chains: chainsParam || 'all'
     });
 
+    // chainId → restaurantName マッピング
+    const CHAIN_ID_TO_NAME = {
+      'hottomotto': 'Hotto Motto',
+      'starbucks': 'STARBUCKS COFFEE',
+      'tacobell': 'Taco Bell',
+      'ikinari': 'いきなりステーキ',
+      'sukiya': 'すき家',
+      'nakau': 'なか卯',
+      'hanamaru': 'はなまるうどん',
+      'bikkuri': 'びっくりドンキー',
+      'hokkahokka': 'ほっかほっか亭',
+      'yayoiken': 'やよい軒',
+      'wendys': 'ウェンディーズ・ファーストキッチン',
+      'olive': 'オリーブの丘',
+      'coco': 'カレーハウスCoCo壱番屋',
+      'origin': 'キッチンオリジン',
+      'krispykreme': 'クリスピー・クリーム・ドーナツ　',
+      'kfc': 'ケンタッキーフライドチキン',
+      'cocos': 'ココス',
+      'subway': 'サブウェイ',
+      'saintmarc': 'サンマルクカフェ',
+      'joyful': 'ジョイフル [Joyfull]',
+      'jollypasta': 'ジョリーバスタ',
+      'matsu': 'ステーキ屋松',
+      'zetteria': 'ゼッテリア',
+      'tullys': 'タリーズコーヒー',
+      'dennys': 'デニーズ',
+      'doutor': 'ドトールコーヒー',
+      'burgerking': 'バーガーキング',
+      'bigboy': 'ビッグボーイ',
+      'firstkitchen': 'ファーストキッチン',
+      'freshness': 'フレッシュネスバーガー',
+      'mcdonalds': 'マクドナルド',
+      'misterdonut': 'ミスタードーナツ',
+      'mos': 'モスバーガー',
+      'royalhost': 'ロイヤルホスト',
+      'lotteria': 'ロッテリア',
+      'yoshinoya': '吉野家',
+      'ootoya': '大戸屋',
+      'tenya': '天丼てんや',
+      'kourakuen': '幸楽苑',
+      'matsunoya': '松のや',
+      'matsuya': '松屋',
+      'kamakura': '鎌倉パスタ',
+      'ringerhut': '長崎ちゃんぽん リンガーハット',
+      'torikizoku': '鳥貴族',
+    };
+
     // 全てmenuItemsコレクションを使用（44チェーン、8500メニュー）
 
     // chainIdsが指定されている場合は絞り込み、なければ全て取得
     let query = db.collection('menuItems');
 
+    let restaurantNames = [];
     if (chainsParam) {
       const chainIds = chainsParam.split(',').filter(c => c);
 
@@ -66,19 +115,44 @@ export async function GET(request) {
         return NextResponse.json([], { status: 200 });
       }
 
+      // chainId → restaurantName に変換
+      restaurantNames = chainIds
+        .map(id => CHAIN_ID_TO_NAME[id])
+        .filter(name => name);
+
+      console.log('[Firestore] chainIds:', chainIds, '→ restaurantNames:', restaurantNames);
+
       // Firestore制限: 10個まで
-      query = query.where('chainId', 'in', chainIds.slice(0, 10));
+      if (restaurantNames.length > 0) {
+        query = query.where('restaurantName', 'in', restaurantNames.slice(0, 10));
+      } else {
+        // マッピングが見つからない場合は空配列を返す
+        return NextResponse.json([], { status: 200 });
+      }
     }
 
     const snapshot = await query.get();
-    console.log(`[Firestore] menuItems: ${snapshot.docs.length} documents (chains: ${chainsParam || 'all'})`);
+    const filterInfo = restaurantNames.length > 0
+      ? `restaurants: ${restaurantNames.join(', ')}`
+      : 'all';
+    console.log(`[Firestore] menuItems: ${snapshot.docs.length} documents (${filterInfo})`);
+
+    // restaurantName → chainId の逆引きマップ
+    const NAME_TO_CHAIN_ID = {};
+    Object.entries(CHAIN_ID_TO_NAME).forEach(([chainId, name]) => {
+      NAME_TO_CHAIN_ID[name] = chainId;
+    });
 
     const menus = snapshot.docs.map(doc => {
       const data = doc.data();
+      const restaurantName = data.restaurantName || '';
+
+      // restaurantNameからchainIdを逆引き
+      const chainId = data.chainId || NAME_TO_CHAIN_ID[restaurantName] || '';
 
       return {
         // フロントエンド互換キー
-        shop: data.restaurantName || '',
+        shop: restaurantName,
         category: data.category || '',
         menu: data.menuName || '',
         calories: data.nutrition?.calories || 0,
@@ -94,7 +168,7 @@ export async function GET(request) {
         id: doc.id,
         source: 'menuItems',
         size: '-',
-        chainId: data.chainId || '', // Add chainId for location-based filtering
+        chainId: chainId, // restaurantNameから逆引きしたchainId
       };
     });
 

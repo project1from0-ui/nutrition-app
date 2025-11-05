@@ -379,7 +379,7 @@ export default function Page() {
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'logo-zoom'|'terms'|'profile'|'mode-select'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'
+  const [currentSection, setCurrentSection] = useState('login'); // 'login'|'logo-zoom'|'terms'|'profile'|'mode-select'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'|'nutrition-detail'
   const [mode, setMode] = useState(''); // 'slim'|'keep'|'bulk'
   const [isClient, setIsClient] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -413,6 +413,21 @@ export default function Page() {
   const [shopSearchQuery, setShopSearchQuery] = useState(''); // 店名フリーワード検索
   const [viewMode, setViewMode] = useState('list'); // 'list' | 'map'
 
+  // 新機能: 栄養トラッキング、お気に入り、履歴
+  const [todayNutrition, setTodayNutrition] = useState({
+    date: new Date().toISOString().split('T')[0],
+    meals: [],
+    totalCalories: 0,
+    totalProtein: 0,
+    totalFat: 0,
+    totalCarbs: 0
+  });
+  const [favorites, setFavorites] = useState([]); // menuIdの配列
+  const [history, setHistory] = useState([]); // 最近選んだメニュー
+
+  // 食事履歴ページ用の選択日付
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
 
   useEffect(() => { setIsClient(true); }, []);
   useEffect(() => {
@@ -423,6 +438,47 @@ export default function Page() {
       setCurrentGoal(g);
     } catch {}
   }, []);
+
+  // 新機能: localStorageから読み込み
+  useEffect(() => {
+    if (!isClient) return;
+    try {
+      // 今日の栄養データを読み込み
+      const savedNutrition = JSON.parse(localStorage.getItem('todayNutrition') || 'null');
+      const today = new Date().toISOString().split('T')[0];
+      if (savedNutrition && savedNutrition.date === today) {
+        setTodayNutrition(savedNutrition);
+      }
+
+      // お気に入りを読み込み
+      const savedFavorites = JSON.parse(localStorage.getItem('favorites') || '[]');
+      setFavorites(savedFavorites);
+
+      // 履歴を読み込み（過去7日分のみ保持）
+      const savedHistory = JSON.parse(localStorage.getItem('menuHistory') || '[]');
+      const sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+      const recentHistory = savedHistory.filter(h => h.timestamp > sevenDaysAgo);
+      setHistory(recentHistory);
+    } catch (e) {
+      console.error('データ読み込みエラー:', e);
+    }
+  }, [isClient]);
+
+  // 新機能: localStorageに保存
+  useEffect(() => {
+    if (!isClient) return;
+    localStorage.setItem('todayNutrition', JSON.stringify(todayNutrition));
+  }, [todayNutrition, isClient]);
+
+  useEffect(() => {
+    if (!isClient) return;
+    localStorage.setItem('favorites', JSON.stringify(favorites));
+  }, [favorites, isClient]);
+
+  useEffect(() => {
+    if (!isClient) return;
+    localStorage.setItem('menuHistory', JSON.stringify(history));
+  }, [history, isClient]);
   useEffect(() => {
     if (!isClient) return;
       fetchMenuData().then(result => {
@@ -444,6 +500,163 @@ export default function Page() {
   }, [currentSection, isClient]);
 
   const [isZooming, setIsZooming] = useState(false);
+
+  // 新機能: メニューを今日の食事に追加
+  const addMealToToday = (menu) => {
+    const today = new Date().toISOString().split('T')[0];
+    const meal = {
+      id: menu.id,
+      shop: menu.shop,
+      menu: menu.menu,
+      calories: menu.calories || 0,
+      protein: menu.protein || 0,
+      fat: menu.fat || 0,
+      carbs: menu.carbs || 0,
+      timestamp: Date.now()
+    };
+
+    setTodayNutrition(prev => {
+      // 日付が変わっていたらリセット
+      if (prev.date !== today) {
+        return {
+          date: today,
+          meals: [meal],
+          totalCalories: meal.calories,
+          totalProtein: meal.protein,
+          totalFat: meal.fat,
+          totalCarbs: meal.carbs
+        };
+      }
+
+      // 同じメニューを追加
+      return {
+        ...prev,
+        meals: [...prev.meals, meal],
+        totalCalories: prev.totalCalories + meal.calories,
+        totalProtein: prev.totalProtein + meal.protein,
+        totalFat: prev.totalFat + meal.fat,
+        totalCarbs: prev.totalCarbs + meal.carbs
+      };
+    });
+
+    // 履歴にも追加
+    setHistory(prev => [meal, ...prev].slice(0, 50)); // 最新50件まで保持
+  };
+
+  // 新機能: お気に入りに追加/削除
+  const toggleFavorite = (menuId) => {
+    setFavorites(prev => {
+      if (prev.includes(menuId)) {
+        return prev.filter(id => id !== menuId);
+      } else {
+        return [...prev, menuId];
+      }
+    });
+  };
+
+  // 新機能: 今日の食事から削除
+  const removeMealFromToday = (index) => {
+    setTodayNutrition(prev => {
+      const newMeals = [...prev.meals];
+      const removed = newMeals.splice(index, 1)[0];
+
+      return {
+        ...prev,
+        meals: newMeals,
+        totalCalories: Math.max(0, prev.totalCalories - removed.calories),
+        totalProtein: Math.max(0, prev.totalProtein - removed.protein),
+        totalFat: Math.max(0, prev.totalFat - removed.fat),
+        totalCarbs: Math.max(0, prev.totalCarbs - removed.carbs)
+      };
+    });
+  };
+
+  // 日付切り替え関数
+  const changeDateBy = (days) => {
+    const newDate = new Date(selectedDate);
+    newDate.setDate(newDate.getDate() + days);
+    setSelectedDate(newDate);
+  };
+
+  const formatDate = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const weekdays = ['日', '月', '火', '水', '木', '金', '土'];
+    const weekday = weekdays[date.getDay()];
+
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (date.toDateString() === today.toDateString()) {
+      return `今日 ${month}/${day}（${weekday}）`;
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return `昨日 ${month}/${day}（${weekday}）`;
+    } else {
+      return `${year}/${month}/${day}（${weekday}）`;
+    }
+  };
+
+  // 1日の推奨摂取量を計算
+  const calculateDailyIntake = () => {
+    if (!userProfile) return null;
+
+    const { height, weight, gender, exerciseFrequency, goal } = userProfile;
+
+    // 年齢を計算
+    const today = new Date();
+    const birthDate = new Date(birthYear, birthMonth - 1, birthDay);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+
+    // 基礎代謝量（BMR）をHarris-Benedict式で計算
+    let bmr;
+    if (gender === 'male') {
+      bmr = 88.362 + (13.397 * weight) + (4.799 * height) - (5.677 * age);
+    } else {
+      bmr = 447.593 + (9.247 * weight) + (3.098 * height) - (4.330 * age);
+    }
+
+    // 活動レベル係数
+    const activityMultiplier = {
+      none: 1.2,
+      light: 1.375,
+      moderate: 1.55,
+      active: 1.725,
+      very_active: 1.9
+    };
+
+    // TDEE（総消費カロリー）
+    const tdee = bmr * (activityMultiplier[exerciseFrequency] || 1.2);
+
+    // 目標に応じた摂取カロリー
+    let targetCalories;
+    if (goal === 'diet') {
+      targetCalories = tdee - 500; // 減量: -500kcal
+    } else if (goal === 'bulk') {
+      targetCalories = tdee + 300; // 増量: +300kcal
+    } else {
+      targetCalories = tdee; // 維持
+    }
+
+    // PFCバランス（タンパク質、脂質、炭水化物）
+    const proteinGrams = weight * (goal === 'bulk' ? 2.0 : 1.6); // 体重×1.6-2.0g
+    const fatGrams = (targetCalories * 0.25) / 9; // 総カロリーの25%を脂質から
+    const carbsGrams = (targetCalories - (proteinGrams * 4 + fatGrams * 9)) / 4; // 残りを炭水化物で
+
+    return {
+      bmr: Math.round(bmr),
+      tdee: Math.round(tdee),
+      targetCalories: Math.round(targetCalories),
+      protein: Math.round(proteinGrams),
+      fat: Math.round(fatGrams),
+      carbs: Math.round(carbsGrams)
+    };
+  };
 
   const handleLogin = () => {
     setIsZooming(true);
@@ -547,6 +760,7 @@ export default function Page() {
     else if (currentSection === 'shop-select') { setCurrentSection('home'); }
     else if (currentSection === 'results') setCurrentSection('shop-select');
     else if (currentSection === 'menu-detail') { setCurrentSection('shop-select'); setSelectedMenu(null); setSelectedStore(null); }
+    else if (currentSection === 'nutrition-detail') setCurrentSection('home');
   };
 
   const handleMenuClick = (menu) => {
@@ -1031,7 +1245,14 @@ AIエージェントです。`}
               onMouseUp={(e) => {
                 clearTimeout(e.target.dataset.timer);
                 setShowModeDescription(null);
-                // 長押しだった場合はフラグをリセット（次回のために）
+
+                // 長押しでなければモード選択して画面遷移
+                if (!isLongPress) {
+                  setMode('slim');
+                  setCurrentSection('home');
+                }
+
+                // 長押しフラグをリセット
                 setTimeout(() => setIsLongPress(false), 100);
               }}
               onMouseLeave={(e) => {
@@ -1111,7 +1332,14 @@ AIエージェントです。`}
               onMouseUp={(e) => {
                 clearTimeout(e.target.dataset.timer);
                 setShowModeDescription(null);
-                // 長押しだった場合はフラグをリセット（次回のために）
+
+                // 長押しでなければモード選択して画面遷移
+                if (!isLongPress) {
+                  setMode('keep');
+                  setCurrentSection('home');
+                }
+
+                // 長押しフラグをリセット
                 setTimeout(() => setIsLongPress(false), 100);
               }}
               onMouseLeave={(e) => {
@@ -1191,7 +1419,14 @@ AIエージェントです。`}
               onMouseUp={(e) => {
                 clearTimeout(e.target.dataset.timer);
                 setShowModeDescription(null);
-                // 長押しだった場合はフラグをリセット（次回のために）
+
+                // 長押しでなければモード選択して画面遷移
+                if (!isLongPress) {
+                  setMode('bulk');
+                  setCurrentSection('home');
+                }
+
+                // 長押しフラグをリセット
                 setTimeout(() => setIsLongPress(false), 100);
               }}
               onMouseLeave={(e) => {
@@ -1371,7 +1606,26 @@ AIエージェントです。`}
                   onMouseEnter={e => e.target.style.background = '#f3f4f6'}
                   onMouseLeave={e => e.target.style.background = 'transparent'}
                 >
-                  編集
+                  PROFILE編集
+                </button>
+                <button
+                  onClick={() => { setCurrentSection('history'); setShowMenu(false); }}
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    background: 'transparent',
+                    border: 'none',
+                    textAlign: 'left',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#374151',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s ease'
+                  }}
+                  onMouseEnter={e => e.target.style.background = '#f3f4f6'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  過去の食事履歴
                 </button>
               </div>
             </div>
@@ -1383,12 +1637,13 @@ AIエージェントです。`}
               textAlign: 'center',
               marginBottom: 30,
               display: 'flex',
+              flexDirection: 'column',
               justifyContent: 'center',
-              alignItems: 'flex-end',
-              gap: 4
+              alignItems: 'center',
+              gap: 2
             }}>
               <span style={{
-                fontSize: 32,
+                fontSize: 36,
                 fontWeight: 800,
                 color: '#111827',
                 lineHeight: 1
@@ -1399,14 +1654,469 @@ AIエージェントです。`}
                 {mode === 'other' && 'OTHER'}
               </span>
               <span style={{
-                fontSize: 12,
-                fontWeight: 400,
-                color: '#6b7280',
+                fontSize: 11,
+                fontWeight: 500,
+                color: '#9ca3af',
                 lineHeight: 1,
-                paddingBottom: 2
+                letterSpacing: '0.5px'
               }}>
-                mode
+                MODE
               </span>
+            </div>
+          )}
+
+          {/* 日付切り替えヘッダー */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 12px',
+            marginBottom: 12,
+            background: '#000',
+            borderRadius: 8,
+            color: 'white'
+          }}>
+            <button
+              onClick={() => changeDateBy(-1)}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: 6,
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+                fontWeight: 700,
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              ＜
+            </button>
+
+            <div style={{
+              flex: 1,
+              textAlign: 'center',
+              fontSize: 14,
+              fontWeight: 600,
+              padding: '0 8px'
+            }}>
+              {formatDate(selectedDate)}
+            </div>
+
+            <button
+              onClick={() => changeDateBy(1)}
+              disabled={selectedDate.toDateString() >= new Date().toDateString()}
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: 6,
+                width: 32,
+                height: 32,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+                fontWeight: 700,
+                color: 'white',
+                cursor: selectedDate.toDateString() >= new Date().toDateString() ? 'not-allowed' : 'pointer',
+                opacity: selectedDate.toDateString() >= new Date().toDateString() ? 0.3 : 1,
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (selectedDate.toDateString() < new Date().toDateString()) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedDate.toDateString() < new Date().toDateString()) {
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
+            >
+              ＞
+            </button>
+          </div>
+
+          {/* 新機能: 今日の栄養サマリー */}
+          <div
+            onClick={() => setCurrentSection('nutrition-detail')}
+            style={{
+              background: 'white',
+              border: '2px solid #000',
+              borderRadius: 12,
+              padding: 20,
+              marginBottom: 20,
+              color: '#000',
+              cursor: 'pointer',
+              transition: 'transform 0.2s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
+                今日の栄養データ
+              </h3>
+              {(() => {
+                const dailyIntake = calculateDailyIntake();
+                if (!dailyIntake) return null;
+
+                // 各栄養素の達成率を計算（目標値に対する割合）
+                const calorieScore = Math.min((todayNutrition.totalCalories / dailyIntake.targetCalories) * 100, 100);
+                const proteinScore = Math.min((todayNutrition.totalProtein / dailyIntake.protein) * 100, 100);
+                const fatScore = Math.min((todayNutrition.totalFat / dailyIntake.fat) * 100, 100);
+                const carbsScore = Math.min((todayNutrition.totalCarbs / dailyIntake.carbs) * 100, 100);
+
+                // 総合スコア：各栄養素の達成率の平均
+                const totalScore = Math.round((calorieScore + proteinScore + fatScore + carbsScore) / 4);
+
+                // スコアに応じた色
+                let scoreColor = '#10b981'; // 緑
+                if (totalScore < 40) scoreColor = '#ef4444'; // 赤
+                else if (totalScore < 70) scoreColor = '#f59e0b'; // オレンジ
+
+                return (
+                  <div style={{
+                    fontSize: 20,
+                    fontWeight: 800,
+                    color: '#000'
+                  }}>
+                    SCORE {totalScore}/100
+                  </div>
+                );
+              })()}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {(() => {
+                const dailyIntake = calculateDailyIntake();
+
+                // 各栄養素の進捗率を計算
+                const calorieProgress = dailyIntake ? Math.min((todayNutrition.totalCalories / dailyIntake.targetCalories) * 100, 100) : 0;
+                const proteinProgress = dailyIntake ? Math.min((todayNutrition.totalProtein / dailyIntake.protein) * 100, 100) : 0;
+                const fatProgress = dailyIntake ? Math.min((todayNutrition.totalFat / dailyIntake.fat) * 100, 100) : 0;
+                const carbsProgress = dailyIntake ? Math.min((todayNutrition.totalCarbs / dailyIntake.carbs) * 100, 100) : 0;
+
+                return (
+                  <>
+                    {/* カロリー */}
+                    <div style={{
+                      background: '#f9fafb',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      overflow: 'hidden'
+                    }}>
+                      {/* 液体の背景 - オレンジ */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: `${calorieProgress}%`,
+                        background: 'linear-gradient(to top, rgba(249, 115, 22, 0.3), rgba(251, 146, 60, 0.15))',
+                        transition: 'height 0.6s ease',
+                        borderRadius: '0 0 8px 8px'
+                      }}></div>
+
+                      {/* コンテンツ */}
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>カロリー</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: '#000' }}>
+                          {Math.round(todayNutrition.totalCalories)}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                          / {dailyIntake ? Math.round(dailyIntake.targetCalories) : '---'}kcal
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* タンパク質 */}
+                    <div style={{
+                      background: '#f9fafb',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      overflow: 'hidden'
+                    }}>
+                      {/* 液体の背景 - 赤 */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: `${proteinProgress}%`,
+                        background: 'linear-gradient(to top, rgba(239, 68, 68, 0.3), rgba(248, 113, 113, 0.15))',
+                        transition: 'height 0.6s ease',
+                        borderRadius: '0 0 8px 8px'
+                      }}></div>
+
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>タンパク質</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: '#000' }}>
+                          {Math.round(todayNutrition.totalProtein)}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                          / {dailyIntake ? Math.round(dailyIntake.protein) : '---'}g
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 脂質 */}
+                    <div style={{
+                      background: '#f9fafb',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      overflow: 'hidden'
+                    }}>
+                      {/* 液体の背景 - 黄色 */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: `${fatProgress}%`,
+                        background: 'linear-gradient(to top, rgba(234, 179, 8, 0.3), rgba(250, 204, 21, 0.15))',
+                        transition: 'height 0.6s ease',
+                        borderRadius: '0 0 8px 8px'
+                      }}></div>
+
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>脂質</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: '#000' }}>
+                          {Math.round(todayNutrition.totalFat)}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                          / {dailyIntake ? Math.round(dailyIntake.fat) : '---'}g
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 炭水化物 */}
+                    <div style={{
+                      background: '#f9fafb',
+                      borderRadius: 8,
+                      padding: 16,
+                      position: 'relative',
+                      overflow: 'hidden'
+                    }}>
+                      {/* 液体の背景 - 青 */}
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        height: `${carbsProgress}%`,
+                        background: 'linear-gradient(to top, rgba(59, 130, 246, 0.3), rgba(96, 165, 250, 0.15))',
+                        transition: 'height 0.6s ease',
+                        borderRadius: '0 0 8px 8px'
+                      }}></div>
+
+                      <div style={{ position: 'relative', zIndex: 1 }}>
+                        <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>炭水化物</div>
+                        <div style={{ fontSize: 24, fontWeight: 700, color: '#000' }}>
+                          {Math.round(todayNutrition.totalCarbs)}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+                          / {dailyIntake ? Math.round(dailyIntake.carbs) : '---'}g
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            {todayNutrition.meals.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #e5e7eb' }}>
+                <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8, fontWeight: 500 }}>今日の食事 ({todayNutrition.meals.length}件)</div>
+                <div style={{ maxHeight: 120, overflowY: 'auto' }}>
+                  {todayNutrition.meals.map((meal, idx) => (
+                    <div key={idx} style={{
+                      fontSize: 12,
+                      padding: '6px 10px',
+                      background: '#f9fafb',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 6,
+                      marginBottom: 4,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      color: '#000'
+                    }}>
+                      <span>{meal.menu} ({meal.calories}kcal)</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeMealFromToday(idx);
+                        }}
+                        style={{
+                          background: '#000',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '3px 8px',
+                          fontSize: 10,
+                          color: 'white',
+                          cursor: 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 前回の食事からの経過時間メーター */}
+          {(() => {
+            // 最後の食事の時刻を取得
+            let hoursSinceLastMeal = null;
+            let lastMealTime = null;
+
+            if (todayNutrition.meals.length > 0) {
+              const lastMealTimestamp = todayNutrition.meals[todayNutrition.meals.length - 1].timestamp;
+              lastMealTime = new Date(lastMealTimestamp);
+              const now = new Date();
+              hoursSinceLastMeal = (now - lastMealTime) / (1000 * 60 * 60);
+            }
+
+            // 理想的な食事間隔: 3-5時間
+            const idealMinHours = 3;
+            const idealMaxHours = 5;
+
+            // メッセージとカラー
+            let message = '';
+            let meterColor = '';
+            let bgColor = '';
+            let progress = 0;
+            let timeDisplay = '';
+
+            if (hoursSinceLastMeal === null) {
+              // 食事記録がない場合
+              message = '本日の食事を記録しましょう！';
+              meterColor = '#6b7280'; // グレー
+              bgColor = '#f9fafb';
+              progress = 0;
+              timeDisplay = '未記録';
+            } else {
+              // メーターの進捗率（0-100%）
+              progress = Math.min((hoursSinceLastMeal / idealMaxHours) * 100, 100);
+
+              // 時間表示
+              const hours = Math.floor(hoursSinceLastMeal);
+              const minutes = Math.round((hoursSinceLastMeal - hours) * 60);
+              timeDisplay = hours > 0 ? `前回の食事から${hours}時間${minutes}分` : `前回の食事から${minutes}分`;
+
+              if (hoursSinceLastMeal < idealMinHours) {
+                message = '前回の食事から間もないです。もう少し時間をおきましょう';
+                meterColor = '#3b82f6'; // 青
+                bgColor = '#eff6ff';
+              } else if (hoursSinceLastMeal < idealMaxHours) {
+                message = 'そろそろ次の食事のタイミングです！';
+                meterColor = '#10b981'; // 緑
+                bgColor = '#f0fdf4';
+              } else if (hoursSinceLastMeal < 7) {
+                message = '食事のタイミングです。栄養補給をおすすめします！';
+                meterColor = '#f59e0b'; // オレンジ
+                bgColor = '#fffbeb';
+              } else {
+                message = '食事の時間が大幅に空いています。すぐに栄養補給しましょう！';
+                meterColor = '#ef4444'; // 赤
+                bgColor = '#fef2f2';
+              }
+            }
+
+            return (
+              <div style={{
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: 8,
+                padding: '10px 14px',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12
+              }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{
+                    width: '100%',
+                    height: 4,
+                    background: '#e5e7eb',
+                    borderRadius: 2,
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      width: `${progress}%`,
+                      height: '100%',
+                      background: '#000',
+                      transition: 'width 0.5s ease',
+                      borderRadius: 2
+                    }}></div>
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#000',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {timeDisplay}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 新機能: お気に入りメニュー */}
+          {favorites.length > 0 && (
+            <div style={{
+              background: 'white',
+              border: '2px solid #f3f4f6',
+              borderRadius: 16,
+              padding: 20,
+              marginBottom: 20
+            }}>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                ⭐ お気に入り ({favorites.length}件)
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {favorites.slice(0, 3).map(fav => {
+                  const menu = menuData.find(m => m.id === fav);
+                  return menu ? (
+                    <div key={fav} style={{
+                      padding: 12,
+                      background: '#f9fafb',
+                      borderRadius: 8,
+                      fontSize: 14
+                    }}>
+                      <div style={{ fontWeight: 600 }}>{menu.menu}</div>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                        {menu.shop} • {menu.calories}kcal
+                      </div>
+                    </div>
+                  ) : null;
+                })}
+                {favorites.length > 3 && (
+                  <div style={{ fontSize: 12, color: '#6b7280', textAlign: 'center', marginTop: 4 }}>
+                    他 {favorites.length - 3}件
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1419,7 +2129,7 @@ AIエージェントです。`}
             color: 'white',
             textAlign: 'center'
           }}>
-            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>近隣メニューを解析</h2>
+            <h2 style={{ fontSize: 24, fontWeight: 800, marginBottom: 12 }}>近隣の最適メニューを探す</h2>
             <p style={{ fontSize: 14, marginBottom: 24, opacity: 0.9 }}>
               あなたに最適なメニューを見つけます
             </p>
@@ -1474,6 +2184,7 @@ AIエージェントです。`}
               <span style={{ animation: 'blinkSearch 1.5s ease-in-out infinite' }}>Search</span>
             </button>
           </div>
+
           <style jsx>{`
             @keyframes blinkSearch {
               0%, 100% { opacity: 1; }
@@ -1745,7 +2456,7 @@ AIエージェントです。`}
       {currentSection === 'shop-select' && (
         <div style={{ ...styles.card, maxWidth: '100%', padding: '20px' }}>
           <button onClick={handleBack} style={styles.backButton}>←</button>
-          <h1 style={styles.title}>Top 10</h1>
+          <h1 style={styles.title}>BEST 10 MENU</h1>
           {(() => {
             // ジャンルごとに店舗をグルーピング
             const map = new Map(); // genre -> Set<shop>
@@ -1809,7 +2520,7 @@ AIエージェントです。`}
                       return (
                         <>
                           {/* メニューリスト */}
-                          <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 420, overflowY:'auto', marginBottom: 20, marginTop: 20 }}>
+                          <div style={{ display:'flex', flexDirection:'column', gap:8, maxHeight: 'calc(100vh - 200px)', overflowY:'auto', marginBottom: 20, marginTop: 20 }}>
                             {displayMenus.map((m, i) => {
                               const isHighlighted = highlightedShop === m.shop;
                               const storeInfo = findStoreForMenu(m);
@@ -1877,6 +2588,176 @@ AIエージェントです。`}
                       );
                     })()}
                 </div>
+
+          {/* 履歴セクション */}
+          {history.length > 0 && (
+            <div style={{
+              marginTop: 32,
+              padding: 20,
+              background: '#f9fafb',
+              borderRadius: 12,
+              border: '1px solid #e5e7eb'
+            }}>
+              <h3 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: '#111827',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                📜 最近選んだメニュー
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {history.slice(0, 5).map((item, index) => {
+                  const menu = item.menu;
+                  const timeAgo = Math.floor((Date.now() - item.timestamp) / 1000 / 60 / 60);
+                  return (
+                    <div
+                      key={index}
+                      onClick={() => handleMenuClick(menu)}
+                      style={{
+                        padding: 12,
+                        background: 'white',
+                        borderRadius: 8,
+                        border: '1px solid #e5e7eb',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#667eea';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(102, 126, 234, 0.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 4 }}>
+                          {menu.menu}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>
+                          {menu.shop} • {menu.calories}kcal
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: 8 }}>
+                        {timeAgo === 0 ? '今' : `${timeAgo}時間前`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 過去の食事タブ */}
+          {todayNutrition.meals.length > 0 && (
+            <div style={{
+              marginTop: 32,
+              padding: 20,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: 12,
+              color: 'white'
+            }}>
+              <h3 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                🍽️ 今日の食事
+              </h3>
+
+              {/* 栄養サマリー */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 16,
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 8
+              }}>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>カロリー:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalCalories)}kcal</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>タンパク質:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalProtein)}g</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>脂質:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalFat)}g</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>炭水化物:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalCarbs)}g</span>
+                </div>
+              </div>
+
+              {/* 食事リスト */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {todayNutrition.meals.map((meal, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      borderRadius: 8,
+                      padding: 12,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                        {meal.menu}
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.9 }}>
+                        {meal.shop} • {meal.calories}kcal • P:{meal.protein}g
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeMealFromToday(index);
+                      }}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        border: 'none',
+                        borderRadius: 6,
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontSize: 18,
+                        padding: 8,
+                        lineHeight: 1,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.5)';
+                        e.currentTarget.style.transform = 'scale(1.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                      title="削除"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
               </div>
             );
           })()}
@@ -1948,9 +2829,760 @@ AIエージェントです。`}
               </button>
             ))}
           </div>
+
+          {/* 履歴セクション */}
+          {history.length > 0 && (
+            <div style={{
+              marginTop: 32,
+              padding: 20,
+              background: '#f9fafb',
+              borderRadius: 12,
+              border: '1px solid #e5e7eb'
+            }}>
+              <h3 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                color: '#111827',
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                📜 最近選んだメニュー
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {history.slice(0, 5).map((item, index) => {
+                  const menu = item.menu;
+                  const timeAgo = Math.floor((Date.now() - item.timestamp) / 1000 / 60 / 60);
+                  return (
+                    <div
+                      key={index}
+                      onClick={() => handleMenuClick(menu)}
+                      style={{
+                        padding: 12,
+                        background: 'white',
+                        borderRadius: 8,
+                        border: '1px solid #e5e7eb',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#667eea';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(102, 126, 234, 0.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 4 }}>
+                          {menu.menu}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#6b7280' }}>
+                          {menu.shop} • {menu.calories}kcal
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: 8 }}>
+                        {timeAgo === 0 ? '今' : `${timeAgo}時間前`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
-          
+
+          {/* 過去の食事タブ */}
+          {todayNutrition.meals.length > 0 && (
+            <div style={{
+              marginTop: 32,
+              padding: 20,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: 12,
+              color: 'white'
+            }}>
+              <h3 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                🍽️ 今日の食事
+              </h3>
+
+              {/* 栄養サマリー */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 16,
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: 8
+              }}>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>カロリー:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalCalories)}kcal</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>タンパク質:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalProtein)}g</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>脂質:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalFat)}g</span>
+                </div>
+                <div style={{ fontSize: 12 }}>
+                  <span style={{ opacity: 0.9 }}>炭水化物:</span>
+                  <span style={{ fontWeight: 700, marginLeft: 4 }}>{Math.round(todayNutrition.totalCarbs)}g</span>
+                </div>
+              </div>
+
+              {/* 食事リスト */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {todayNutrition.meals.map((meal, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.2)',
+                      borderRadius: 8,
+                      padding: 12,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
+                        {meal.menu}
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.9 }}>
+                        {meal.shop} • {meal.calories}kcal • P:{meal.protein}g
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeMealFromToday(index);
+                      }}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.3)',
+                        border: 'none',
+                        borderRadius: 6,
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontSize: 18,
+                        padding: 8,
+                        lineHeight: 1,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.5)';
+                        e.currentTarget.style.transform = 'scale(1.1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
+                      title="削除"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+            </div>
+          )}
+
+      {/* 食事履歴詳細ページ */}
+      {currentSection === 'history' && (
+        <div style={styles.card}>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
+          <h1 style={styles.title}>📜 食事履歴</h1>
+
+          {/* 日付切り替えヘッダー */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px',
+            marginBottom: 24,
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            borderRadius: 12,
+            boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
+            color: 'white'
+          }}>
+            <button
+              onClick={() => changeDateBy(-1)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                borderRadius: 8,
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+                fontWeight: 700,
+                color: 'white',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                e.currentTarget.style.transform = 'scale(1.1)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+                e.currentTarget.style.transform = 'scale(1)';
+              }}
+            >
+              ＜
+            </button>
+
+            <div style={{
+              flex: 1,
+              textAlign: 'center',
+              fontSize: 16,
+              fontWeight: 600,
+              padding: '0 16px'
+            }}>
+              {formatDate(selectedDate)}
+            </div>
+
+            <button
+              onClick={() => changeDateBy(1)}
+              disabled={selectedDate >= new Date()}
+              style={{
+                background: selectedDate >= new Date()
+                  ? 'rgba(255, 255, 255, 0.1)'
+                  : 'rgba(255, 255, 255, 0.2)',
+                border: 'none',
+                borderRadius: 8,
+                width: 40,
+                height: 40,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 20,
+                fontWeight: 700,
+                color: 'white',
+                cursor: selectedDate >= new Date() ? 'not-allowed' : 'pointer',
+                opacity: selectedDate >= new Date() ? 0.5 : 1,
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                if (selectedDate < new Date()) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)';
+                  e.currentTarget.style.transform = 'scale(1.1)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedDate < new Date()) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
+                  e.currentTarget.style.transform = 'scale(1)';
+                }
+              }}
+            >
+              ＞
+            </button>
+          </div>
+
+          {/* 今日の食事サマリー */}
+          {todayNutrition.meals.length > 0 && (
+            <div style={{
+              marginBottom: 32,
+              padding: 20,
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              borderRadius: 16,
+              color: 'white'
+            }}>
+              <h2 style={{
+                fontSize: 18,
+                fontWeight: 700,
+                marginBottom: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}>
+                🍽️ 今日の食事
+              </h2>
+
+              {/* 栄養サマリー */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                borderRadius: 12,
+                padding: 16,
+                marginBottom: 16,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 12
+              }}>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 8,
+                  padding: 12,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4 }}>カロリー</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{Math.round(todayNutrition.totalCalories)}</div>
+                  <div style={{ fontSize: 11, opacity: 0.8 }}>kcal</div>
+                </div>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 8,
+                  padding: 12,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4 }}>タンパク質</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{Math.round(todayNutrition.totalProtein)}</div>
+                  <div style={{ fontSize: 11, opacity: 0.8 }}>g</div>
+                </div>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 8,
+                  padding: 12,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4 }}>脂質</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{Math.round(todayNutrition.totalFat)}</div>
+                  <div style={{ fontSize: 11, opacity: 0.8 }}>g</div>
+                </div>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  borderRadius: 8,
+                  padding: 12,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: 12, opacity: 0.9, marginBottom: 4 }}>炭水化物</div>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{Math.round(todayNutrition.totalCarbs)}</div>
+                  <div style={{ fontSize: 11, opacity: 0.8 }}>g</div>
+                </div>
+              </div>
+
+              {/* 食事リスト */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {todayNutrition.meals.map((meal, index) => (
+                  <div key={index} style={{
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    borderRadius: 12,
+                    padding: 14,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>
+                        {meal.menu}
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.9 }}>
+                        {meal.shop}
+                      </div>
+                      <div style={{ fontSize: 12, opacity: 0.9, marginTop: 4 }}>
+                        {meal.calories}kcal • P:{meal.protein}g • F:{meal.fat}g • C:{meal.carbs}g
+                      </div>
+                      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+                        {new Date(meal.timestamp).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removeMealFromToday(index)}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.8)',
+                        border: 'none',
+                        borderRadius: 8,
+                        padding: '8px 12px',
+                        color: 'white',
+                        cursor: 'pointer',
+                        fontSize: 16,
+                        marginLeft: 12,
+                        transition: 'all 0.2s'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(239, 68, 68, 1)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(239, 68, 68, 0.8)';
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 最近見たメニュー */}
+          <div style={{
+            padding: 20,
+            background: '#f9fafb',
+            borderRadius: 16,
+            border: '1px solid #e5e7eb'
+          }}>
+            <h2 style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: '#111827',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8
+            }}>
+              🕐 最近見たメニュー
+            </h2>
+
+            {history.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {history.map((item, index) => {
+                  const menu = item.menu;
+                  const timeAgo = Math.floor((Date.now() - item.timestamp) / 1000 / 60 / 60);
+                  return (
+                    <div
+                      key={index}
+                      onClick={() => handleMenuClick(menu)}
+                      style={{
+                        padding: 14,
+                        background: 'white',
+                        borderRadius: 12,
+                        border: '1px solid #e5e7eb',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = '#667eea';
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.15)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = '#e5e7eb';
+                        e.currentTarget.style.boxShadow = 'none';
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: '#111827', marginBottom: 6 }}>
+                          {menu.menu}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#6b7280' }}>
+                          {menu.shop} • {menu.calories}kcal • P:{menu.protein}g
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', whiteSpace: 'nowrap', marginLeft: 12 }}>
+                        {timeAgo === 0 ? '今' : timeAgo < 24 ? `${timeAgo}時間前` : `${Math.floor(timeAgo / 24)}日前`}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{
+                padding: 40,
+                textAlign: 'center',
+                color: '#9ca3af',
+                fontSize: 14
+              }}>
+                まだ閲覧履歴がありません
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 栄養詳細ページ */}
+      {currentSection === 'nutrition-detail' && (
+        <div style={{
+          minHeight: '100vh',
+          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          padding: 20,
+          color: 'white'
+        }}>
+          <button onClick={handleBack} style={{
+            background: 'rgba(255, 255, 255, 0.2)',
+            border: 'none',
+            borderRadius: 8,
+            padding: '8px 16px',
+            color: 'white',
+            fontSize: 16,
+            fontWeight: 600,
+            cursor: 'pointer',
+            marginBottom: 20,
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.3)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+          >
+            ← ホームに戻る
+          </button>
+
+          <h1 style={{ fontSize: 28, fontWeight: 800, marginBottom: 24, textAlign: 'center' }}>
+            📊 栄養詳細
+          </h1>
+
+          {/* 今日の摂取栄養 */}
+          <div style={{
+            background: 'white',
+            borderRadius: 16,
+            padding: 24,
+            marginBottom: 20,
+            color: '#000'
+          }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#667eea' }}>
+              今日の摂取栄養
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div style={{ textAlign: 'center', padding: 16, background: '#f9fafb', borderRadius: 12 }}>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>カロリー</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#667eea' }}>
+                  {Math.round(todayNutrition.totalCalories)}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>kcal</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 16, background: '#f9fafb', borderRadius: 12 }}>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>タンパク質</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#10b981' }}>
+                  {Math.round(todayNutrition.totalProtein)}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>g</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 16, background: '#f9fafb', borderRadius: 12 }}>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>脂質</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#f59e0b' }}>
+                  {Math.round(todayNutrition.totalFat)}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>g</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 16, background: '#f9fafb', borderRadius: 12 }}>
+                <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>炭水化物</div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: '#3b82f6' }}>
+                  {Math.round(todayNutrition.totalCarbs)}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>g</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 1日の推奨摂取量 */}
+          {(() => {
+            const dailyIntake = calculateDailyIntake();
+            if (!dailyIntake) return null;
+
+            return (
+              <div style={{
+                background: 'white',
+                borderRadius: 16,
+                padding: 24,
+                marginBottom: 20,
+                color: '#000'
+              }}>
+                <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#667eea' }}>
+                  1日の推奨摂取量
+                </h2>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>基礎代謝量（BMR）</div>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{dailyIntake.bmr} kcal</div>
+                </div>
+
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 8 }}>総消費カロリー（TDEE）</div>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{dailyIntake.tdee} kcal</div>
+                </div>
+
+                <div style={{
+                  padding: 16,
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  borderRadius: 12,
+                  color: 'white',
+                  marginBottom: 20
+                }}>
+                  <div style={{ fontSize: 14, opacity: 0.9, marginBottom: 8 }}>目標摂取カロリー</div>
+                  <div style={{ fontSize: 28, fontWeight: 800 }}>{dailyIntake.targetCalories} kcal</div>
+                  <div style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
+                    {goal === 'diet' ? '減量目標' : goal === 'bulk' ? '増量目標' : '維持目標'}
+                  </div>
+                </div>
+
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: '#667eea' }}>
+                  推奨PFCバランス
+                </h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div style={{ textAlign: 'center', padding: 12, background: '#f0fdf4', borderRadius: 8, border: '2px solid #10b981' }}>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>タンパク質</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#10b981' }}>{dailyIntake.protein}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>g</div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 12, background: '#fffbeb', borderRadius: 8, border: '2px solid #f59e0b' }}>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>脂質</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#f59e0b' }}>{dailyIntake.fat}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>g</div>
+                  </div>
+                  <div style={{ textAlign: 'center', padding: 12, background: '#eff6ff', borderRadius: 8, border: '2px solid #3b82f6' }}>
+                    <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>炭水化物</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: '#3b82f6' }}>{dailyIntake.carbs}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>g</div>
+                  </div>
+                </div>
+
+                {/* 進捗バー */}
+                <div style={{ marginTop: 24 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: '#667eea' }}>
+                    本日の達成率
+                  </h3>
+
+                  {/* カロリー */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>カロリー</span>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>
+                        {Math.round((todayNutrition.totalCalories / dailyIntake.targetCalories) * 100)}%
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min((todayNutrition.totalCalories / dailyIntake.targetCalories) * 100, 100)}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #667eea, #764ba2)',
+                        transition: 'width 0.3s'
+                      }}></div>
+                    </div>
+                  </div>
+
+                  {/* タンパク質 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>タンパク質</span>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>
+                        {Math.round((todayNutrition.totalProtein / dailyIntake.protein) * 100)}%
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min((todayNutrition.totalProtein / dailyIntake.protein) * 100, 100)}%`,
+                        height: '100%',
+                        background: '#10b981',
+                        transition: 'width 0.3s'
+                      }}></div>
+                    </div>
+                  </div>
+
+                  {/* 脂質 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>脂質</span>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>
+                        {Math.round((todayNutrition.totalFat / dailyIntake.fat) * 100)}%
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min((todayNutrition.totalFat / dailyIntake.fat) * 100, 100)}%`,
+                        height: '100%',
+                        background: '#f59e0b',
+                        transition: 'width 0.3s'
+                      }}></div>
+                    </div>
+                  </div>
+
+                  {/* 炭水化物 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>炭水化物</span>
+                      <span style={{ fontSize: 14, fontWeight: 600 }}>
+                        {Math.round((todayNutrition.totalCarbs / dailyIntake.carbs) * 100)}%
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: 8, background: '#e5e7eb', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min((todayNutrition.totalCarbs / dailyIntake.carbs) * 100, 100)}%`,
+                        height: '100%',
+                        background: '#3b82f6',
+                        transition: 'width 0.3s'
+                      }}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* 今日の食事履歴 */}
+          {todayNutrition.meals.length > 0 && (
+            <div style={{
+              background: 'white',
+              borderRadius: 16,
+              padding: 24,
+              marginBottom: 20,
+              color: '#000'
+            }}>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: '#667eea' }}>
+                今日の食事履歴 ({todayNutrition.meals.length}件)
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {todayNutrition.meals.map((meal, idx) => (
+                  <div key={idx} style={{
+                    padding: 16,
+                    background: '#f9fafb',
+                    borderRadius: 12,
+                    border: '1px solid #e5e7eb'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{meal.menu}</div>
+                        <div style={{ fontSize: 14, color: '#6b7280' }}>{meal.shop}</div>
+                      </div>
+                      <button
+                        onClick={() => removeMealFromToday(idx)}
+                        style={{
+                          background: '#ef4444',
+                          border: 'none',
+                          borderRadius: 6,
+                          padding: '6px 12px',
+                          color: 'white',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 8, fontSize: 12 }}>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>カロリー: </span>
+                        <span style={{ fontWeight: 600 }}>{meal.calories}kcal</span>
+                      </div>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>P: </span>
+                        <span style={{ fontWeight: 600, color: '#10b981' }}>{meal.protein}g</span>
+                      </div>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>F: </span>
+                        <span style={{ fontWeight: 600, color: '#f59e0b' }}>{meal.fat}g</span>
+                      </div>
+                      <div>
+                        <span style={{ color: '#6b7280' }}>C: </span>
+                        <span style={{ fontWeight: 600, color: '#3b82f6' }}>{meal.carbs}g</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 詳細 */}
       {currentSection === 'menu-detail' && selectedMenu && (
         <div className="detail-wrap" style={styles.card}>
@@ -2040,8 +3672,9 @@ AIエージェントです。`}
             return null;
           })()}
 
-          {/* このメニューを食べるボタン */}
-          <div style={{ marginTop: 30, textAlign: 'center' }}>
+          {/* アクションボタン */}
+          <div style={{ marginTop: 30, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* 経路を表示ボタン */}
             <button
               onClick={() => {
                 console.log('[Google Maps] Button clicked');
@@ -2073,32 +3706,93 @@ AIエージェントです。`}
                   console.error('[Google Maps] selectedMenu.chainId:', selectedMenu?.chainId);
                 }
               }}
-            style={{
-                padding: '16px 48px',
-                background: '#000',
-                color: 'white',
-                border: 'none',
+              style={{
+                padding: '14px 0',
+                background: 'white',
+                color: '#000',
+                border: '2px solid #000',
                 borderRadius: 12,
                 fontSize: 16,
-                fontWeight: 800,
+                fontWeight: 700,
                 cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)',
-                transition: 'all 0.2s ease'
+                transition: 'all 0.2s ease',
+                width: '100%'
               }}
               onMouseEnter={e => {
-                e.target.style.transform = 'translateY(-2px)';
-                e.target.style.boxShadow = '0 8px 20px rgba(102, 126, 234, 0.4)';
+                e.target.style.background = '#f9fafb';
               }}
               onMouseLeave={e => {
-                e.target.style.transform = 'translateY(0)';
-                e.target.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+                e.target.style.background = 'white';
               }}
             >
-              このメニューに決定（経路を表示）
+              経路を表示
             </button>
-                  </div>
-                </div>
-          )}
+
+            {/* このメニューに決定（記録）ボタン */}
+            <button
+              onClick={() => {
+                // 食事記録をtodayNutritionに追加
+                const mealRecord = {
+                  menu: selectedMenu.menu,
+                  shop: selectedMenu.shop,
+                  calories: selectedMenu.calories,
+                  protein: selectedMenu.protein,
+                  fat: selectedMenu.fat,
+                  carbs: selectedMenu.carbs,
+                  timestamp: Date.now()
+                };
+
+                const updatedMeals = [...todayNutrition.meals, mealRecord];
+                const updatedNutrition = {
+                  date: new Date().toISOString().split('T')[0],
+                  totalCalories: todayNutrition.totalCalories + selectedMenu.calories,
+                  totalProtein: todayNutrition.totalProtein + selectedMenu.protein,
+                  totalFat: todayNutrition.totalFat + selectedMenu.fat,
+                  totalCarbs: todayNutrition.totalCarbs + selectedMenu.carbs,
+                  meals: updatedMeals
+                };
+
+                setTodayNutrition(updatedNutrition);
+                localStorage.setItem('todayNutrition', JSON.stringify(updatedNutrition));
+
+                // 履歴にも追加
+                const updatedHistory = [mealRecord, ...history];
+                setHistory(updatedHistory);
+                localStorage.setItem('mealHistory', JSON.stringify(updatedHistory));
+
+                // ホームに戻る
+                setCurrentSection('home');
+                setSelectedMenu(null);
+                setSelectedStore(null);
+
+                // 確認メッセージ
+                alert(`${selectedMenu.menu}を記録しました！`);
+              }}
+              style={{
+                padding: '14px 0',
+                background: '#000',
+                color: 'white',
+                border: '2px solid #000',
+                borderRadius: 12,
+                fontSize: 16,
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                width: '100%'
+              }}
+              onMouseEnter={e => {
+                e.target.style.background = '#333';
+              }}
+              onMouseLeave={e => {
+                e.target.style.background = '#000';
+              }}
+            >
+              このメニューに決定（記録）
+            </button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
