@@ -83,6 +83,32 @@ const CHAIN_MAPPING = {
   '鎌倉パスタ': 'kamakura',
   'リンガーハット': 'ringerhut',
   '鳥貴族': 'torikizoku',
+  // コンビニチェーン
+  'セブン-イレブン': 'seven',
+  'ローソン': 'lawson',
+  'ファミリーマート': 'familymart',
+  // AI推計レストラン
+  'プロント': 'pronto',
+  'かつや': 'katsuya',
+  'くら寿司': 'kurasushi',
+  'はま寿司': 'hamazushi',
+  'ガスト': 'gusto',
+  'サイゼリヤ': 'saizeriya',
+  'スシロー': 'sushiro',
+  'バーミヤン': 'bamiyan',
+  'ペッパーランチ': 'pepperlunch',
+  '串カツ田中': 'kushikatsu',
+  '富士そば': 'fujisoba',
+  '和食さと': 'sato',
+  '夢庵': 'yumean',
+  '大阪王将': 'osaka',
+  '日高屋': 'hidakaya',
+  '来来軒': 'rairaiken',
+  '洋麺屋五右衛門': 'goemon',
+  '筋肉食堂': 'kinniku',
+  '築地銀だこ': 'gindako',
+  '銀のさら': 'ginsara',
+  '餃子の王将': 'gyoza',
 };
 
 const SEARCH_KEYWORDS = Object.keys(CHAIN_MAPPING);
@@ -113,7 +139,7 @@ export async function GET(request) {
     if (cached.exists) {
       const cacheData = cached.data();
       const age = Date.now() - cacheData.timestamp;
-      const cacheValidDays = 7;
+      const cacheValidDays = 0; // 一時的にキャッシュ無効化（コンビニ追加のため）
 
       // 7日以内のキャッシュなら使用
       if (age < cacheValidDays * 24 * 60 * 60 * 1000) {
@@ -124,6 +150,8 @@ export async function GET(request) {
           userLocation: cacheData.location || { lat, lng },
           fromCache: true,
         });
+      } else {
+        console.log(`[Places API] キャッシュ期限切れ、再検索します`);
       }
     }
 
@@ -155,6 +183,8 @@ export async function GET(request) {
     }
 
     const storeDetails = []; // 店舗詳細情報を保存
+
+    console.log(`[Places API] 検索キーワード数: ${SEARCH_KEYWORDS.length}`, SEARCH_KEYWORDS.slice(-5)); // 最後の5件を表示（コンビニとAI推計を確認）
 
     // 各チェーンを並列検索
     const searchPromises = SEARCH_KEYWORDS.map(async (keyword) => {

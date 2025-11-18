@@ -48,10 +48,12 @@ export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const classification = searchParams.get('classification');
     const chainsParam = searchParams.get('chains'); // カンマ区切りのchainId
+    const limit = parseInt(searchParams.get('limit') || '10', 10); // 取得件数（デフォルト10）
 
     console.log('[Firestore Query]', {
       classification: classification || 'all',
-      chains: chainsParam || 'all'
+      chains: chainsParam || 'all',
+      limit: limit
     });
 
     // chainId → restaurantName マッピング
@@ -219,9 +221,10 @@ export async function GET(request) {
 
     scored.sort((a, b) => b.score - a.score);
 
-    console.log(`[Firestore] 返却: ${Math.min(scored.length, 10)} メニュー`);
+    const resultCount = Math.min(scored.length, limit);
+    console.log(`[Firestore] 返却: ${resultCount} メニュー (要求: ${limit}件)`);
 
-    return NextResponse.json(scored.slice(0, 10), {
+    return NextResponse.json(scored.slice(0, limit), {
       status: 200,
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
