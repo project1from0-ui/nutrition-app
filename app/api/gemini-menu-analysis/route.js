@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { image, userMode, continuousMode, detectedMenus } = await request.json();
+    const { image, userMode, continuousMode, detectedMenus, excludeMenus } = await request.json();
 
     if (!image) {
       return NextResponse.json(
@@ -45,18 +45,24 @@ export async function POST(request) {
     if (continuousMode) {
       // 連続スキャンモード: メニュー名のリストを抽出（段階2）
       prompt = `
-この画像はレストランやコンビニのメニュー表です。
-画像内に表示されているすべてのメニュー名を抽出してください。
+あなたは画像からメニュー表を検出する専門家です。
+この画像を分析し、レストランやコンビニのメニュー表が映っているかを判定してください。
 
-以下のJSON形式で出力してください：
+**判定基準:**
+- メニュー名が3つ以上読み取れる → confidence 0.8以上
+- メニュー名が1-2個読み取れる → confidence 0.6以上
+- メニュー名が読み取れない、またはメニュー表でない → confidence 0.5以下
+
+**必ず以下のJSON形式で出力してください（他のテキストは含めないこと）:**
 {
   "detectedMenus": ["メニュー名1", "メニュー名2", "メニュー名3"],
   "confidence": 0.95
 }
 
-※confidenceは0-1の範囲で、メニュー名が明確に読み取れる場合は0.8以上を返してください。
-※メニュー名が読み取れない場合は空配列を返してください。
-※メニュー表全体が映っていることを確認してください。
+**重要:**
+- JSONのみを出力してください（説明文や\`\`\`json等は不要）
+- メニュー表らしきものが映っていれば、読み取れたメニュー名をすべてリストアップしてください
+- 価格や説明文は含めず、メニュー名のみを抽出してください
 `;
     } else if (detectedMenus && detectedMenus.length > 0) {
       // 段階3: 検出されたメニューから最適な1品を選択
@@ -87,30 +93,44 @@ export async function POST(request) {
 ※栄養成分は一般的な値を推定してください。
 `;
     } else {
-      // 通常モード: 詳細な推薦
+      // 通常モード: 詳細な推薦（シンプル・1ステップ）
+      const excludeInstruction = excludeMenus && excludeMenus.length > 0
+        ? `\n**除外するメニュー:** 以下のメニューは既に提案済みのため、絶対に選ばないでください: ${excludeMenus.join(', ')}\n`
+        : '';
+
       prompt = `
 あなたは栄養管理の専門家です。
-この画像はレストランやコンビニのメニュー表です。
+この画像はレストランやコンビニのメニュー表の写真です。
 
-ユーザーの目標: ${userMode || '健康的な食事'}
-アドバイス基準: ${modeDescription}
+**タスク:**
+1. 画像からすべてのメニュー名を読み取る
+2. ユーザーの目標に最も適したメニューを1つ選ぶ
+3. そのメニューの栄養成分を推定する
+4. そのメニューの栄養バランスを簡潔に説明する
 
-以下の形式で、メニュー表から最も適したメニューを1つ選んで提案してください：
+**ユーザーの目標:** ${userMode || '健康的な食事'}
+**アドバイス基準:** ${modeDescription}
+${excludeInstruction}
+**必ず以下のJSON形式で回答してください（他のテキストは含めないこと）:**
 
-【おすすめメニュー】
-メニュー名: [具体的なメニュー名]
+{
+  "menuName": "メニュー表に記載されている正確なメニュー名",
+  "reason": "栄養バランスについて1-2行で簡潔に（例：高タンパク質・低脂質でバランスが良い、適度なカロリーで炭水化物も十分など）",
+  "nutrition": {
+    "calories": 推定カロリー値(数値のみ),
+    "protein": 推定タンパク質量(数値のみ),
+    "fat": 推定脂質量(数値のみ),
+    "carbs": 推定炭水化物量(数値のみ)
+  }
+}
 
-【理由】
-[なぜこのメニューがユーザーの目標に適しているか、簡潔に説明]
-
-【推定栄養成分】
-- カロリー: [推定値]kcal
-- タンパク質: [推定値]g
-- 脂質: [推定値]g
-- 炭水化物: [推定値]g
-
-※メニュー表に栄養成分が記載されている場合はその値を使用し、記載がない場合は一般的な栄養成分を推定してください。
-※メニュー名は画像に表示されている正確な名前を使用してください。
+**重要:**
+- メニュー表に栄養成分が記載されている場合はその値を使用
+- 記載がない場合は一般的な値を推定
+- メニュー名は画像に表示されている正確な名前をそのまま使用
+- reasonは栄養バランスのみを簡潔に記載（材料や調理方法は不要、栄養素の特徴のみ）
+- 1-2行以内で簡潔に
+- JSONのみを出力してください（説明文や\`\`\`json等は不要）
 `;
     }
 
@@ -149,13 +169,25 @@ export async function POST(request) {
       // 連続スキャンモード: JSONレスポンスをパース
       try {
         // JSONブロックを抽出 (```json ... ``` の場合に対応)
-        let jsonText = text;
-        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+        let jsonText = text.trim();
+
+        // コードブロックを除去
+        const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (jsonMatch) {
-          jsonText = jsonMatch[1];
+          jsonText = jsonMatch[1].trim();
         }
 
+        // JSONオブジェクトを抽出（前後のテキストを除去）
+        const objectMatch = jsonText.match(/\{[\s\S]*\}/);
+        if (objectMatch) {
+          jsonText = objectMatch[0];
+        }
+
+        console.log('[Gemini API] Parsing JSON:', jsonText);
         const parsedData = JSON.parse(jsonText);
+
+        console.log('[Gemini API] Parsed data:', parsedData);
+
         return NextResponse.json({
           success: true,
           recommendation: parsedData,
@@ -163,6 +195,7 @@ export async function POST(request) {
         });
       } catch (parseError) {
         console.error('[Gemini API] Failed to parse JSON:', parseError);
+        console.error('[Gemini API] Original text:', text);
         // パース失敗時は通常のテキストとして返す
         return NextResponse.json({
           success: true,
@@ -174,12 +207,52 @@ export async function POST(request) {
         });
       }
     } else {
-      // 通常モード（段階3での推奨結果）
-      return NextResponse.json({
-        success: true,
-        recommendation: text,
-        stage: 'selection'
-      });
+      // 通常モード（段階3での推奨結果）- JSON形式でパース
+      try {
+        // JSONブロックを抽出 (```json ... ``` の場合に対応)
+        let jsonText = text.trim();
+
+        // コードブロックを除去
+        const jsonMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (jsonMatch) {
+          jsonText = jsonMatch[1].trim();
+        }
+
+        // JSONオブジェクトを抽出（前後のテキストを除去）
+        const objectMatch = jsonText.match(/\{[\s\S]*\}/);
+        if (objectMatch) {
+          jsonText = objectMatch[0];
+        }
+
+        console.log('[Gemini API] Parsing recommendation JSON:', jsonText);
+        const parsedData = JSON.parse(jsonText);
+
+        console.log('[Gemini API] Parsed recommendation:', parsedData);
+
+        // メニュー名が存在しない、または空の場合はメニュー未検出と判断
+        if (!parsedData.menuName || parsedData.menuName.trim() === '') {
+          return NextResponse.json({
+            success: false,
+            error: 'メニュー情報を読み取れませんでした',
+            noMenuDetected: true
+          });
+        }
+
+        return NextResponse.json({
+          success: true,
+          recommendation: parsedData,
+          stage: 'selection'
+        });
+      } catch (parseError) {
+        console.error('[Gemini API] Failed to parse recommendation JSON:', parseError);
+        console.error('[Gemini API] Original text:', text);
+        // パース失敗時はメニュー未検出として扱う
+        return NextResponse.json({
+          success: false,
+          error: 'メニュー情報を読み取れませんでした',
+          noMenuDetected: true
+        });
+      }
     }
 
   } catch (error) {
