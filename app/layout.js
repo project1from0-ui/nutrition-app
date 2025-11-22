@@ -1,6 +1,9 @@
 import { Inter, Noto_Serif_JP } from "next/font/google";
 import "./globals.css";
 
+// Import AuthProvider
+import { AuthProvider } from '../context/AuthContext';
+
 const inter = Inter({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -28,7 +31,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body className={`${inter.variable} ${interMono.variable} ${notoSerifJp.variable} antialiased`}>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

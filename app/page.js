@@ -3,6 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CHAIN_ID_TO_NAME } from '../lib/chain-mapping';
 
+// 認証hookとサインイン関数をインポート
+import { useAuth } from '../context/AuthContext';
+import { signInWithGoogle, handleSignOut } from './lib/firebase';
+
 // Google Mapsはクライアントサイドのみで動作するため、dynamic importを使用
 const GoogleMap = dynamic(() => import('./components/GoogleMap'), { ssr: false });
 
@@ -591,41 +595,57 @@ export default function Page() {
     carbs: ''
   });
 
+  // コンテキストからauth情報を取得
+  const { user, loading } = useAuth();
+
 
   useEffect(() => { setIsClient(true); }, []);
 
+  // auth情報をユーザープロフィールに反映
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const saved = JSON.parse(localStorage.getItem('nutrition_profile') || '{}');
-      const g = (saved.goal || 'stay');
-      setCurrentGoal(g);
+    if (loading) {
+      setCurrentSection('loading');
+      return;
+    }
 
-      // userProfileを復元
-      if (saved.birthYear && saved.height && saved.weight && saved.gender) {
-        const profile = {
-          birthYear: saved.birthYear,
-          birthMonth: saved.birthMonth,
-          birthDay: saved.birthDay,
-          gender: saved.gender,
-          height: saved.height,
-          weight: saved.weight,
-          exerciseFrequency: saved.exerciseFrequency || 'none',
-          exerciseTypes: saved.exerciseTypes || [],
-          goal: saved.goal || 'stay'
-        };
-        setUserProfile(profile);
-        setBirthYear(saved.birthYear);
-        setBirthMonth(saved.birthMonth);
-        setBirthDay(saved.birthDay);
-        setGender(saved.gender);
-        setHeight(saved.height);
-        setWeight(saved.weight);
-        setExerciseFrequency(saved.exerciseFrequency || 'none');
-        setSelectedExerciseTypes(saved.exerciseTypes || []);
-      }
-    } catch {}
-  }, []);
+    if (user) {
+      // ログイン済み
+      // APIからプロフィールを取得して反映
+      fetch(`/api/profile?userId=${user.uid}`)
+        .then(res => res.json())
+        .then(data => {
+        if (data.success && data.profile) {
+          setUserProfile(data.profile); //プロフィールオブジェクトをセット
+          // Firestoreのプロフィール情報を各フィールドに反映
+          setBirthYear(data.profile.birthYear || '2000');
+          setBirthMonth(data.profile.birthMonth || '1');
+          setBirthDay(data.profile.birthDay || '1');
+          setGender(data.profile.gender || 'male');
+          setHeight(data.profile.height || '170');
+          setWeight(data.profile.weight || '65');
+          setExerciseFrequency(data.profile.exerciseFrequency || 'ほとんど運動しない');
+          setSelectedExerciseTypes(data.profile.exerciseTypes || []);
+          // プロフィールが埋まっているかを確認し、不十分ならプロフィール入力へ誘導
+          if (!data.profile.birthYear || !data.profile.height || !data.profile.weight || !data.profile.gender || !data.profile.birthYear) {
+            setShowProfileForm(true);
+            setCurrentSection('profile');
+          } else { // プロフィールが埋まっていればモード選択へ
+            setShowProfileForm(false);
+            setCurrentSection('mode-select');
+          }
+        } else {
+          // プロフィールがない場合、プロフィール入力へ誘導
+          setShowProfileForm(true);
+          setCurrentSection('profile');
+        }
+      });
+    } else {
+      // 未ログイン
+      setUserProfile(null);
+      setCurrentSection('logo-zoom');
+    }
+  }, [user, loading]); // このeffectはuserまたはloadingの変更時に実行
+
 
   // 新機能: localStorageから読み込み
   useEffect(() => {
@@ -903,6 +923,12 @@ export default function Page() {
 
 
   const handleSearch = async () => {
+    // 保存前にログイン済みか確認
+    if (!user) {
+      alert('プロフィールを保存するにはログインが必要です。');
+      return;
+    }
+
     if (!birthYear || !birthMonth || !birthDay || !gender || !height || !weight) {
       alert('すべての項目を入力してください。');
       return;
@@ -923,7 +949,11 @@ export default function Page() {
       weight: parseFloat(weight),
       exerciseFrequency,
       exerciseTypes: selectedExerciseTypes,
-      diseases: selectedDiseases
+      diseases: selectedDiseases,
+      userId: user.uid,
+      email: user.email,
+      displayName: user.displayName,
+      photoURL: user.photoURL
     };
 
     // ローカルストレージからuserIdを取得（既存ユーザーの場合）
@@ -1679,7 +1709,7 @@ export default function Page() {
       {/* ロゴズーム画面 */}
       {currentSection === 'logo-zoom' && (
         <div
-          onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); }}
+          onClick={async () => { await signInWithGoogle(); }}
           style={{
             position: 'fixed',
             top: 0,
@@ -2223,6 +2253,25 @@ AIエージェントです。`}
                     onMouseLeave={e => e.target.style.background = 'transparent'}
                   >
                     過去の食事履歴
+                  </button>
+                  <button
+                    onClick={() => { handleSignOut(); setShowMenu(false); }}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      background: 'transparent',
+                      border: 'none',
+                      textAlign: 'left',
+                      fontSize: 14,
+                      fontWeight: 600,
+                      color: '#ef4444',
+                      cursor: 'pointer',
+                      transition: 'background 0.2s ease'
+                    }}
+                    onMouseEnter={e => e.target.style.background = '#fef2f2'}
+                    onMouseLeave={e => e.target.style.background = 'transparent'}
+                  >
+                    ログアウト
                   </button>
                 </div>
               </div>
