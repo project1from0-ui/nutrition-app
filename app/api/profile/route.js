@@ -42,33 +42,31 @@ export async function POST(request) {
     const db = getFirebaseAdmin();
     const profileData = await request.json();
 
+    // userIdをリクエストボディから取得
+    const userId = profileData.userId;
+
+    if(!userId) {
+      return NextResponse.json(
+        { success: false, error: 'userId is required in profile data' },
+        { status: 400 }
+      );
+    }
+
     // タイムスタンプを追加
     const dataToSave = {
       ...profileData,
-      createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp()
     };
 
-    // ユーザーIDがある場合は更新、ない場合は新規作成
-    if (profileData.userId) {
-      const docRef = db.collection('profiles').doc(profileData.userId);
-      await docRef.set(dataToSave, { merge: true });
+    // Auth uidであるuserIDをdocument IDとして使用
+    const docRef = db.collection('profiles').doc(userId);
+    await docRef.set(dataToSave, { merge: true });
 
-      return NextResponse.json({
-        success: true,
-        userId: profileData.userId,
-        message: 'Profile updated successfully'
-      });
-    } else {
-      // 新規作成
-      const docRef = await db.collection('profiles').add(dataToSave);
-
-      return NextResponse.json({
-        success: true,
-        userId: docRef.id,
-        message: 'Profile created successfully'
-      });
-    }
+    return NextResponse.json({
+      success: true,
+      userId: userId,
+      message: 'Profile updated/created successfully'
+    });
   } catch (error) {
     console.error('Error saving profile:', error);
     return NextResponse.json(
