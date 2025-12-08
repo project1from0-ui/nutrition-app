@@ -1,16 +1,39 @@
 // app/providers.js
 'use client';
-import posthog from 'posthog-js'
-import { PostHogProvider } from 'posthog-js/react'
-
-if (typeof window !== 'undefined') {
-  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
-    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-    person_profiles: 'identified_only', // Recommended for better privacy/cost control
-    capture_pageview: false // We will handle pageviews manually if needed, or leave true for auto
-  })
-}
+import { useEffect, useState } from 'react';
+import posthog from 'posthog-js';
+import { PostHogProvider } from 'posthog-js/react';
 
 export function PHProvider({ children }) {
-  return <PostHogProvider client={posthog}>{children}</PostHogProvider>
+  const [isInitialized, setIsInitialized] = useState(false);
+
+  useEffect(() => {
+    // Only initialize PostHog on the client side
+    if (typeof window !== 'undefined' && !posthog.__loaded) {
+      const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
+      const host = process.env.NEXT_PUBLIC_POSTHOG_HOST;
+
+      if (key && host) {
+        posthog.init(key, {
+          api_host: host,
+          person_profiles: 'identified_only',
+          capture_pageview: false,
+          loaded: (posthog) => {
+            setIsInitialized(true);
+          }
+        });
+      } else {
+        console.warn('PostHog environment variables not configured');
+        setIsInitialized(true); // Still mark as initialized to render children
+      }
+    } else {
+      setIsInitialized(true);
+    }
+  }, []);
+
+  if (!isInitialized) {
+    return <>{children}</>;
+  }
+
+  return <PostHogProvider client={posthog}>{children}</PostHogProvider>;
 }
