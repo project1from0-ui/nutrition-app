@@ -1,8 +1,7 @@
-// context/AuthContext.js
 "use client";
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
-import { auth } from '../app/lib/firebase'; // Corrected path to your firebase.js
+import { auth } from '../app/lib/firebase'; 
 
 const AuthContext = createContext();
 
@@ -13,7 +12,13 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // This listener fires when the user logs in or out
+    // 🛡️ Guard: If auth is missing (build time or error), stop here to prevent crash
+    if (!auth) {
+      console.warn("Auth not initialized, skipping listener");
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setUser(user);
@@ -23,16 +28,11 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     });
 
-    // Cleanup the listener
     return () => unsubscribe();
   }, []);
 
-  const value = {
-    user,
-    loading
-  };
+  const value = { user, loading };
 
-  // Render children only when auth state is no longer loading
   return (
     <AuthContext.Provider value={value}>
       {!loading && children}

@@ -7,6 +7,9 @@ import { CHAIN_ID_TO_NAME } from '../lib/chain-mapping';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle, handleSignOut } from './lib/firebase';
 
+// posthogをインポート
+import posthog from 'posthog-js';
+
 // Google Mapsはクライアントサイドのみで動作するため、dynamic importを使用
 const GoogleMap = dynamic(() => import('./components/GoogleMap'), { ssr: false });
 
@@ -597,6 +600,20 @@ export default function Page() {
 
   // コンテキストからauth情報を取得
   const { user, loading } = useAuth();
+
+  // ユーザ情報をposthogに送信
+  useEffect(() => {
+  if (user) {
+    // PostHogのセッションをFirebaseのuidに紐づけ
+    posthog.identify(user.uid, {
+      email: user.email,
+      name: user.displayName, 
+    });
+  } else if (!loading) {
+    // ユーザがログアウトした場合、PostHogのセッションをリセット
+    posthog.reset();
+  }
+}, [user, loading]);
 
 
   useEffect(() => { setIsClient(true); }, []);
