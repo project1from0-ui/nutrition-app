@@ -827,7 +827,7 @@ export default function Page() {
 
   // 画面
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [currentSection, setCurrentSection] = useState('logo-zoom'); // 'logo-zoom'|'terms'|'profile'|'mode-select'|'nutrition-goals'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'|'nutrition-detail'
+  const [currentSection, setCurrentSection] = useState('logo-zoom'); // 'logo-zoom'|'terms'|'feature-select'|'nutrition-search'|'profile'|'mode-select'|'nutrition-goals'|'home'|'goal-select'|'loading'|'shop-select'|'results'|'menu-detail'|'directions'|'nutrition-detail'
   const [mode, setMode] = useState(''); // 'slim'|'keep'|'bulk'
   const [isClient, setIsClient] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -852,6 +852,12 @@ export default function Page() {
   const [menuData, setMenuData] = useState([]);
   const [scoredMenus, setScoredMenus] = useState([]);
   const [selectedShop, setSelectedShop] = useState('');
+
+  // 栄養成分表検索
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedGenres, setExpandedGenres] = useState({});
+  const [selectedRestaurant, setSelectedRestaurant] = useState(null);
+  const [restaurantMenus, setRestaurantMenus] = useState([]);
   const [selectedMenu, setSelectedMenu] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [accumulatedRequests, setAccumulatedRequests] = useState([]);
@@ -940,6 +946,32 @@ export default function Page() {
 
 
   useEffect(() => { setIsClient(true); }, []);
+
+  // 飲食店メニューを取得
+  useEffect(() => {
+    if (currentSection === 'restaurant-menu' && selectedRestaurant && restaurantMenus.length === 0) {
+      const fetchMenus = async () => {
+        try {
+          console.log('[Restaurant Menu] Fetching menus for:', selectedRestaurant);
+          const response = await fetch(`/api/menus-unified?limit=100000&sources=official,convenience,ai_imputed&minConfidence=0`);
+          const data = await response.json();
+          console.log('[Restaurant Menu] All menus fetched:', data.menus?.length);
+
+          // 選択された飲食店のメニューのみフィルター
+          const filtered = data.menus?.filter(menu =>
+            menu.restaurant_chain?.toLowerCase().includes(selectedRestaurant.toLowerCase()) ||
+            selectedRestaurant.toLowerCase().includes(menu.restaurant_chain?.toLowerCase())
+          ) || [];
+
+          console.log('[Restaurant Menu] Filtered menus:', filtered.length);
+          setRestaurantMenus(filtered);
+        } catch (error) {
+          console.error('[Restaurant Menu] Error fetching menus:', error);
+        }
+      };
+      fetchMenus();
+    }
+  }, [currentSection, selectedRestaurant, restaurantMenus.length]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1657,7 +1689,14 @@ export default function Page() {
 
   const handleBack = () => {
     if (currentSection === 'terms') setCurrentSection('login');
-    else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('login'); }
+    else if (currentSection === 'feature-select') { setCurrentSection('logo-zoom'); }
+    else if (currentSection === 'nutrition-search') { setCurrentSection('feature-select'); }
+    else if (currentSection === 'restaurant-menu') {
+      setCurrentSection('nutrition-search');
+      setSelectedRestaurant(null);
+      setRestaurantMenus([]);
+    }
+    else if (currentSection === 'profile') { setShowProfileForm(false); setCurrentSection('feature-select'); }
     else if (currentSection === 'mode-select') { setShowProfileForm(true); setCurrentSection('profile'); }
     else if (currentSection === 'home') { setCurrentSection('mode-select'); }
     else if (currentSection === 'shop-select') { setCurrentSection('home'); }
@@ -2554,7 +2593,7 @@ export default function Page() {
       {/* ロゴズーム画面 */}
       {currentSection === 'logo-zoom' && (
         <div
-          onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); }}
+          onClick={() => { setCurrentSection('feature-select'); }}
           style={{
             position: 'fixed',
             top: 0,
@@ -2604,6 +2643,352 @@ export default function Page() {
           }}>
             BULKを始める
           </p>
+        </div>
+      )}
+
+      {/* 機能選択画面 */}
+      {currentSection === 'feature-select' && (
+        <div style={{
+          height: '100vh',
+          background: 'white',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '40px 20px',
+          gap: '30px'
+        }}>
+          <button
+            onClick={() => { setCurrentSection('nutrition-search'); }}
+            style={{
+              width: '100%',
+              maxWidth: '400px',
+              padding: '40px 30px',
+              background: 'white',
+              color: '#333',
+              border: '2px solid #e0e0e0',
+              borderRadius: 16,
+              cursor: 'pointer',
+              fontSize: 24,
+              fontWeight: 700,
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = '#000';
+              e.target.style.color = 'white';
+              e.target.style.borderColor = '#000';
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = 'white';
+              e.target.style.color = '#333';
+              e.target.style.borderColor = '#e0e0e0';
+            }}
+          >
+            栄養成分表-検索
+          </button>
+
+          <button
+            onClick={() => { setShowProfileForm(true); setCurrentSection('profile'); }}
+            style={{
+              width: '100%',
+              maxWidth: '400px',
+              padding: '40px 30px',
+              background: 'white',
+              color: '#333',
+              border: '2px solid #e0e0e0',
+              borderRadius: 16,
+              cursor: 'pointer',
+              fontSize: 24,
+              fontWeight: 700,
+              boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+              transition: 'all 0.3s ease'
+            }}
+            onMouseEnter={e => {
+              e.target.style.background = '#000';
+              e.target.style.color = 'white';
+              e.target.style.borderColor = '#000';
+            }}
+            onMouseLeave={e => {
+              e.target.style.background = 'white';
+              e.target.style.color = '#333';
+              e.target.style.borderColor = '#e0e0e0';
+            }}
+          >
+            栄養管理-AIエージェント
+          </button>
+        </div>
+      )}
+
+      {/* 栄養成分表検索画面 */}
+      {currentSection === 'nutrition-search' && (
+        <div style={{ ...styles.card, height: '100vh', overflow: 'auto', display: 'flex', flexDirection: 'column', padding: '20px' }}>
+          <button onClick={handleBack} style={styles.backButton}>←</button>
+          <h1 style={{ ...styles.title, marginBottom: 20 }}>栄養成分表検索</h1>
+
+          {/* 検索バー */}
+          <div style={{ marginBottom: 20 }}>
+            <input
+              type="text"
+              placeholder="飲食店名で検索..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                fontSize: 16,
+                border: '2px solid #e0e0e0',
+                borderRadius: 8,
+                outline: 'none'
+              }}
+            />
+          </div>
+
+          {/* ジャンル別飲食店一覧 */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {(() => {
+              // 静的な飲食店データ（ジャンル別）
+              const restaurantsByGenre = {
+                'コンビニ': [
+                  'セブンイレブン',
+                  'ファミリーマート',
+                  'ローソン',
+                  'ミニストップ'
+                ],
+                'カフェ': [
+                  'スターバックス',
+                  'ドトール',
+                  'タリーズ',
+                  'コメダ珈琲店',
+                  'サンマルクカフェ'
+                ],
+                'ファストフード': [
+                  'マクドナルド',
+                  'モスバーガー',
+                  'ケンタッキーフライドチキン',
+                  'バーガーキング',
+                  'ロッテリア',
+                  'フレッシュネスバーガー',
+                  'サブウェイ'
+                ],
+                '定食': [
+                  'やよい軒',
+                  '大戸屋',
+                  'キッチンオリジン',
+                  'ほっともっと',
+                  'オリジン弁当'
+                ],
+                'ファミレス': [
+                  'サイゼリヤ',
+                  'ガスト',
+                  'ジョナサン',
+                  'バーミヤン',
+                  'デニーズ',
+                  'ロイヤルホスト',
+                  'ココス',
+                  'ビッグボーイ'
+                ],
+                '牛丼・丼もの': [
+                  '吉野家',
+                  'すき家',
+                  '松屋',
+                  'なか卯',
+                  '天丼てんや'
+                ],
+                'カレー': [
+                  'CoCo壱番屋',
+                  'ゴーゴーカレー',
+                  'カレーハウスCoCo壱番屋'
+                ],
+                'ラーメン': [
+                  '日高屋',
+                  '一蘭',
+                  '天下一品',
+                  '幸楽苑'
+                ],
+                'うどん・そば': [
+                  '丸亀製麺',
+                  'はなまるうどん',
+                  '富士そば',
+                  'ゆで太郎'
+                ],
+                'ステーキ': [
+                  'いきなりステーキ',
+                  'ステーキガスト',
+                  'ペッパーランチ',
+                  '松屋のステーキ'
+                ],
+                '回転寿司': [
+                  'スシロー',
+                  'くら寿司',
+                  'はま寿司',
+                  'かっぱ寿司'
+                ]
+              };
+
+              // 検索フィルタ適用
+              const filteredGenres = {};
+              Object.keys(restaurantsByGenre).forEach(genre => {
+                const filtered = restaurantsByGenre[genre].filter(name =>
+                  searchQuery === '' || name.toLowerCase().includes(searchQuery.toLowerCase())
+                );
+                if (filtered.length > 0) {
+                  filteredGenres[genre] = filtered;
+                }
+              });
+
+              if (Object.keys(filteredGenres).length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+                    <p>該当する飲食店が見つかりませんでした</p>
+                  </div>
+                );
+              }
+
+              // ジャンルの表示順序
+              const genreOrder = ['コンビニ', 'カフェ', 'ファストフード', '定食', 'ファミレス', '牛丼・丼もの', 'カレー', 'ラーメン', 'うどん・そば', 'ステーキ', '回転寿司'];
+              const sortedGenres = genreOrder.filter(g => filteredGenres[g]);
+
+              return sortedGenres.map((genre, genreIndex) => {
+                const isGenreExpanded = expandedGenres[genre];
+
+                return (
+                  <div key={genreIndex} style={{ marginBottom: 16 }}>
+                    {/* ジャンルヘッダー（クリック可能） */}
+                    <div
+                      onClick={() => setExpandedGenres(prev => ({
+                        ...prev,
+                        [genre]: !prev[genre]
+                      }))}
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 'bold',
+                        marginBottom: 8,
+                        color: '#333',
+                        paddingBottom: 8,
+                        borderBottom: '2px solid #e0e0e0',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span>{genre}</span>
+                      <span style={{
+                        fontSize: 20,
+                        color: '#999',
+                        transform: isGenreExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.2s ease'
+                      }}>
+                        ›
+                      </span>
+                    </div>
+
+                    {/* 飲食店一覧（展開時） */}
+                    {isGenreExpanded && (
+                      <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                        {filteredGenres[genre].map((restaurantName, index) => (
+                          <div
+                            key={index}
+                            onClick={() => {
+                              setSelectedRestaurant(restaurantName);
+                              setCurrentSection('restaurant-menu');
+                            }}
+                            style={{
+                              padding: '14px 16px',
+                              background: 'white',
+                              border: '2px solid #e0e0e0',
+                              borderRadius: 10,
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease'
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.background = '#f5f5f5';
+                              e.currentTarget.style.borderColor = '#333';
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.background = 'white';
+                              e.currentTarget.style.borderColor = '#e0e0e0';
+                            }}
+                          >
+                            <div style={{ fontWeight: 'bold', fontSize: 15 }}>
+                              {restaurantName}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* 飲食店メニュー表示画面 */}
+      {currentSection === 'restaurant-menu' && (
+        <div style={{ ...styles.card, height: '100vh', overflow: 'auto', display: 'flex', flexDirection: 'column', padding: '20px' }}>
+          <button onClick={() => {
+            setCurrentSection('nutrition-search');
+            setSelectedRestaurant(null);
+            setRestaurantMenus([]);
+          }} style={styles.backButton}>←</button>
+          <h1 style={{ ...styles.title, marginBottom: 20 }}>{selectedRestaurant}</h1>
+
+          {/* メニュー表示 */}
+          {restaurantMenus.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#666' }}>
+              <p>メニューを読み込んでいます...</p>
+            </div>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <div style={{ marginBottom: 12, color: '#666', fontSize: 14 }}>
+                {restaurantMenus.length} メニュー
+              </div>
+
+              {restaurantMenus.map((menu, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '16px',
+                    marginBottom: 12,
+                    background: 'white',
+                    border: '2px solid #e0e0e0',
+                    borderRadius: 10
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', fontSize: 16, marginBottom: 12, color: '#333' }}>
+                    {menu.menu_item || 'メニュー名なし'}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, fontSize: 14 }}>
+                    <div style={{ color: '#666' }}>
+                      <span style={{ fontWeight: 600, color: '#333' }}>カロリー:</span> {menu.calories || '-'} kcal
+                    </div>
+                    <div style={{ color: '#666' }}>
+                      <span style={{ fontWeight: 600, color: '#333' }}>タンパク質:</span> {menu.protein || '-'} g
+                    </div>
+                    <div style={{ color: '#666' }}>
+                      <span style={{ fontWeight: 600, color: '#333' }}>脂質:</span> {menu.fat || '-'} g
+                    </div>
+                    <div style={{ color: '#666' }}>
+                      <span style={{ fontWeight: 600, color: '#333' }}>炭水化物:</span> {menu.carbohydrates || '-'} g
+                    </div>
+                    {menu.sodium && (
+                      <div style={{ color: '#666' }}>
+                        <span style={{ fontWeight: 600, color: '#333' }}>ナトリウム:</span> {menu.sodium} mg
+                      </div>
+                    )}
+                    {menu.price && (
+                      <div style={{ color: '#666' }}>
+                        <span style={{ fontWeight: 600, color: '#333' }}>価格:</span> ¥{menu.price}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
